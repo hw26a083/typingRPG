@@ -1,0 +1,6 @@
+{
+  "name": "Typing RPG Spec Maker",
+  "description": "タイピングRPGゲームの仕様書を作成・管理するためのツール",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
