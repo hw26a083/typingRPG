@@ -13,6 +13,7 @@ export interface Character {
   provokeTurns: number; // warrior's provocation
   ultimateCooldown: number; // ultimate life countdown
   shield: number; // shield value
+  ultimateUsed?: boolean;
 }
 
 export interface Skill {

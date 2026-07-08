@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
-/* Hide scrollbars across all browsers */
-::-webkit-scrollbar {
+/* Hide scrollbars across all elements and browsers */
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+*::-webkit-scrollbar {
   display: none;
 }
 
@@ -9,5 +13,6 @@ html, body {
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
   overflow: hidden; /* Lock viewport and prevent manual scrollbar scrolling */
-  height: 100%;
+  height: 100vh;
+  width: 100vw;
 }

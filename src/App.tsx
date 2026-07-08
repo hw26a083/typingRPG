@@ -245,7 +245,9 @@ const ROMAN_TO_KANA: { [key: string]: string } = {
   'buriza-domaunten': 'ぶりざーどまうんてん',
   'saisyuuougi・ekusupuro-zyon': 'さいしゅうおうぎ・えくすぷろーじょん',
   'o-ruhi-ru': 'おーるひーる',
-  'yowakuna-ru': 'よわくなーる',
+  'hi-ru': 'ひーる',
+  'tataku': 'たたく',
+  'onodekiru': 'おのできる',
   'tuyokuna-ru': 'つよくなーる',
   'saisyuuougi・za・monkureboryu-syon': 'さいしゅうおうぎ・ざ・もんくれぼりゅーしょん',
   'za・si-rudo': 'ざ・しーるど',
@@ -344,6 +346,7 @@ function checkTypingPrefix(kana: string, input: string): {
   isComplete: boolean; 
   nextKeys: string[]; 
   matchedKanaCount: number;
+  matchedInputLen: number;
 } {
   if (input === "") {
     return {
@@ -351,11 +354,30 @@ function checkTypingPrefix(kana: string, input: string): {
       isComplete: false,
       nextKeys: getNextKeysForKana(kana, 0),
       matchedKanaCount: 0,
+      matchedInputLen: 0,
     };
   }
 
-  const results: { kanaPos: number; isComplete: boolean }[] = [];
-  const queue: { kanaPos: number; inputPos: number }[] = [{ kanaPos: 0, inputPos: 0 }];
+  interface QueueItem {
+    kanaPos: number;
+    inputPos: number;
+    lastCompletedKanaPos: number;
+    lastCompletedInputPos: number;
+  }
+
+  const results: { 
+    kanaPos: number; 
+    isComplete: boolean; 
+    lastCompletedKanaPos: number; 
+    lastCompletedInputPos: number; 
+  }[] = [];
+  
+  const queue: QueueItem[] = [{ 
+    kanaPos: 0, 
+    inputPos: 0, 
+    lastCompletedKanaPos: 0, 
+    lastCompletedInputPos: 0 
+  }];
   const visited = new Set<string>();
   
   while (queue.length > 0) {
@@ -368,6 +390,8 @@ function checkTypingPrefix(kana: string, input: string): {
       results.push({
         kanaPos: curr.kanaPos,
         isComplete: curr.kanaPos === kana.length,
+        lastCompletedKanaPos: curr.lastCompletedKanaPos,
+        lastCompletedInputPos: curr.lastCompletedInputPos,
       });
       continue;
     }
@@ -380,11 +404,21 @@ function checkTypingPrefix(kana: string, input: string): {
       const inputPart = input.slice(curr.inputPos);
       const nextChar = inputPart[0];
       // スキップパス
-      queue.push({ kanaPos: curr.kanaPos + 1, inputPos: curr.inputPos });
+      queue.push({ 
+        kanaPos: curr.kanaPos + 1, 
+        inputPos: curr.inputPos,
+        lastCompletedKanaPos: curr.kanaPos + 1,
+        lastCompletedInputPos: curr.inputPos,
+      });
       
       // 入力されたパス
       if (nextChar === '・' || nextChar === '/' || nextChar === ' ' || nextChar === '-') {
-        queue.push({ kanaPos: curr.kanaPos + 1, inputPos: curr.inputPos + 1 });
+        queue.push({ 
+          kanaPos: curr.kanaPos + 1, 
+          inputPos: curr.inputPos + 1,
+          lastCompletedKanaPos: curr.kanaPos + 1,
+          lastCompletedInputPos: curr.inputPos + 1,
+        });
       }
       continue;
     }
@@ -411,9 +445,19 @@ function checkTypingPrefix(kana: string, input: string): {
         if (consonant && !['a', 'i', 'u', 'e', 'o'].includes(consonant)) {
           const doubleRoman = consonant + cand;
           if (inputPart.startsWith(doubleRoman)) {
-            queue.push({ kanaPos: curr.kanaPos + kanaConsumed, inputPos: curr.inputPos + doubleRoman.length });
+            queue.push({ 
+              kanaPos: curr.kanaPos + kanaConsumed, 
+              inputPos: curr.inputPos + doubleRoman.length,
+              lastCompletedKanaPos: curr.kanaPos + kanaConsumed,
+              lastCompletedInputPos: curr.inputPos + doubleRoman.length,
+            });
           } else if (doubleRoman.startsWith(inputPart)) {
-            queue.push({ kanaPos: curr.kanaPos, inputPos: curr.inputPos + inputPart.length });
+            queue.push({ 
+              kanaPos: curr.kanaPos, 
+              inputPos: curr.inputPos + inputPart.length,
+              lastCompletedKanaPos: curr.lastCompletedKanaPos,
+              lastCompletedInputPos: curr.lastCompletedInputPos,
+            });
           }
         }
       }
@@ -421,9 +465,19 @@ function checkTypingPrefix(kana: string, input: string): {
       const xtsuCandidates = ['xtsu', 'ltsu', 'xtu', 'ltu'];
       for (const cand of xtsuCandidates) {
         if (inputPart.startsWith(cand)) {
-          queue.push({ kanaPos: curr.kanaPos + 1, inputPos: curr.inputPos + cand.length });
+          queue.push({ 
+            kanaPos: curr.kanaPos + 1, 
+            inputPos: curr.inputPos + cand.length,
+            lastCompletedKanaPos: curr.kanaPos + 1,
+            lastCompletedInputPos: curr.inputPos + cand.length,
+          });
         } else if (cand.startsWith(inputPart)) {
-          queue.push({ kanaPos: curr.kanaPos, inputPos: curr.inputPos + inputPart.length });
+          queue.push({ 
+            kanaPos: curr.kanaPos, 
+            inputPos: curr.inputPos + inputPart.length,
+            lastCompletedKanaPos: curr.lastCompletedKanaPos,
+            lastCompletedInputPos: curr.lastCompletedInputPos,
+          });
         }
       }
       continue;
@@ -448,16 +502,36 @@ function checkTypingPrefix(kana: string, input: string): {
       }
       
       if (inputPart.startsWith('nn')) {
-        queue.push({ kanaPos: curr.kanaPos + 1, inputPos: curr.inputPos + 2 });
+        queue.push({ 
+          kanaPos: curr.kanaPos + 1, 
+          inputPos: curr.inputPos + 2,
+          lastCompletedKanaPos: curr.kanaPos + 1,
+          lastCompletedInputPos: curr.inputPos + 2,
+        });
       } else if ('nn'.startsWith(inputPart)) {
-        queue.push({ kanaPos: curr.kanaPos, inputPos: curr.inputPos + inputPart.length });
+        queue.push({ 
+          kanaPos: curr.kanaPos, 
+          inputPos: curr.inputPos + inputPart.length,
+          lastCompletedKanaPos: curr.lastCompletedKanaPos,
+          lastCompletedInputPos: curr.lastCompletedInputPos,
+        });
       }
       
       if (!needsDoubleN) {
         if (inputPart.startsWith('n')) {
-          queue.push({ kanaPos: curr.kanaPos + 1, inputPos: curr.inputPos + 1 });
+          queue.push({ 
+            kanaPos: curr.kanaPos + 1, 
+            inputPos: curr.inputPos + 1,
+            lastCompletedKanaPos: curr.kanaPos + 1,
+            lastCompletedInputPos: curr.inputPos + 1,
+          });
         } else if ('n'.startsWith(inputPart)) {
-          queue.push({ kanaPos: curr.kanaPos, inputPos: curr.inputPos + inputPart.length });
+          queue.push({ 
+            kanaPos: curr.kanaPos, 
+            inputPos: curr.inputPos + inputPart.length,
+            lastCompletedKanaPos: curr.lastCompletedKanaPos,
+            lastCompletedInputPos: curr.lastCompletedInputPos,
+          });
         }
       }
       continue;
@@ -471,9 +545,19 @@ function checkTypingPrefix(kana: string, input: string): {
       if (candidates) {
         for (const cand of candidates) {
           if (inputPart.startsWith(cand)) {
-            queue.push({ kanaPos: curr.kanaPos + 2, inputPos: curr.inputPos + cand.length });
+            queue.push({ 
+              kanaPos: curr.kanaPos + 2, 
+              inputPos: curr.inputPos + cand.length,
+              lastCompletedKanaPos: curr.kanaPos + 2,
+              lastCompletedInputPos: curr.inputPos + cand.length,
+            });
           } else if (cand.startsWith(inputPart)) {
-            queue.push({ kanaPos: curr.kanaPos, inputPos: curr.inputPos + inputPart.length });
+            queue.push({ 
+              kanaPos: curr.kanaPos, 
+              inputPos: curr.inputPos + inputPart.length,
+              lastCompletedKanaPos: curr.lastCompletedKanaPos,
+              lastCompletedInputPos: curr.lastCompletedInputPos,
+            });
           }
         }
       }
@@ -484,9 +568,19 @@ function checkTypingPrefix(kana: string, input: string): {
     if (candidates) {
       for (const cand of candidates) {
         if (inputPart.startsWith(cand)) {
-          queue.push({ kanaPos: curr.kanaPos + 1, inputPos: curr.inputPos + cand.length });
+          queue.push({ 
+            kanaPos: curr.kanaPos + 1, 
+            inputPos: curr.inputPos + cand.length,
+            lastCompletedKanaPos: curr.kanaPos + 1,
+            lastCompletedInputPos: curr.inputPos + cand.length,
+          });
         } else if (cand.startsWith(inputPart)) {
-          queue.push({ kanaPos: curr.kanaPos, inputPos: curr.inputPos + inputPart.length });
+          queue.push({ 
+            kanaPos: curr.kanaPos, 
+            inputPos: curr.inputPos + inputPart.length,
+            lastCompletedKanaPos: curr.lastCompletedKanaPos,
+            lastCompletedInputPos: curr.lastCompletedInputPos,
+          });
         }
       }
     }
@@ -494,7 +588,22 @@ function checkTypingPrefix(kana: string, input: string): {
   
   const isValid = results.length > 0;
   const isComplete = results.some(r => r.isComplete);
-  const matchedKanaCount = results.reduce((max, r) => Math.max(max, r.kanaPos), 0);
+  
+  let matchedKanaCount = 0;
+  let matchedInputLen = 0;
+  
+  if (isValid) {
+    const best = results.reduce((best, item) => {
+      if (item.lastCompletedKanaPos > best.lastCompletedKanaPos) return item;
+      if (item.lastCompletedKanaPos === best.lastCompletedKanaPos) {
+        return item.lastCompletedInputPos > best.lastCompletedInputPos ? item : best;
+      }
+      return best;
+    }, results[0]);
+    
+    matchedKanaCount = best.lastCompletedKanaPos;
+    matchedInputLen = best.lastCompletedInputPos;
+  }
   
   const nextKeysSet = new Set<string>();
   if (isValid) {
@@ -510,6 +619,7 @@ function checkTypingPrefix(kana: string, input: string): {
     isComplete,
     nextKeys: Array.from(nextKeysSet),
     matchedKanaCount,
+    matchedInputLen,
   };
 }
 
@@ -562,8 +672,9 @@ export default function App() {
   // Game General State
   const [screen, setScreen] = useState<'start' | 'explore' | 'battle' | 'game_clear'>('start');
   const [stageIndex, setStageIndex] = useState<number>(0);
-  const [party, setParty] = useState<Character[]>(createParty(1));
+  const [party, setParty] = useState<Character[]>(createParty(2));
   const [soundOn, setSoundOn] = useState<boolean>(true);
+  const [portalAlert, setPortalAlert] = useState<boolean>(false);
 
   // Stats over the entire game
   const [globalStats, setGlobalStats] = useState<TypingStats>({
@@ -749,7 +860,9 @@ export default function App() {
         // Only allow progression if no monsters remain on map
         const activeMonsters = mapEntities.filter((e) => e.type === 'monster');
         if (activeMonsters.length > 0) {
-          addDamageAnim('先にすべてのモンスターを倒して！', 50, 40, 'text-yellow-400 font-bold bg-black/80 p-2 rounded text-sm shadow');
+          setPortalAlert(true);
+          setTimeout(() => setPortalAlert(false), 1800);
+          sound.playKeyWrong();
           return prev;
         } else {
           // Go to next stage
@@ -792,6 +905,21 @@ export default function App() {
     if (currentStage.number === 4 && mapEntities.filter((e) => e.type === 'monster').length === 1 && monsterEntity.id === 'monster-0') {
       // If it's the last stage, and final monster, spawn Demon King!
       spawnedEnemies = [JSON.parse(JSON.stringify(BOSS_TEMPLATE))];
+      // Party levels up to 5 and fully recovers for the final boss!
+      setParty((prev) => 
+        prev.map((char) => ({
+          ...char,
+          level: 5,
+          hp: char.maxHp,
+          isDead: false,
+          atkBuff: 1.0,
+          defBuff: 1.0,
+          provokeTurns: 0,
+          ultimateCooldown: 0,
+          shield: 0,
+        }))
+      );
+      addDamageAnim('魔王降臨！ 全員レベル5になり、最終奥義が解放された！', 50, 45, 'text-purple-400 font-extrabold bg-slate-900/95 px-4 py-3 border-2 border-purple-500 rounded text-lg shadow-xl');
     } else {
       // Spawn random 1 or 2 monsters of this stage template
       const templateNames = currentStage.monsterTemplates;
@@ -823,6 +951,8 @@ export default function App() {
 
     // Remove this monster from map
     setMapEntities((prev) => prev.filter((e) => e.id !== monsterEntity.id));
+    // Reset ultimateUsed state for the new battle
+    setParty((prev) => prev.map((char) => ({ ...char, ultimateUsed: false })));
     setScreen('battle');
   };
 
@@ -838,11 +968,15 @@ export default function App() {
       sound.playLevelUp();
       const nextIdx = stageIndex + 1;
       setStageIndex(nextIdx);
+      
+      // Stage 3 to Stage 4 (index 3) does not increase level. They level up to 5 at Boss.
+      const shouldLevelUp = nextIdx < 3;
+
       // Party fully recovers and levels up!
       setParty((prev) => 
         prev.map((char) => ({
           ...char,
-          level: char.level + 1,
+          level: shouldLevelUp ? char.level + 1 : char.level,
           hp: char.maxHp,
           isDead: false,
           atkBuff: 1.0,
@@ -852,7 +986,11 @@ export default function App() {
           shield: 0,
         }))
       );
-      addDamageAnim('レベルアップ！ 全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-lg shadow-xl');
+      if (shouldLevelUp) {
+        addDamageAnim('レベルアップ！ 全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-lg shadow-xl');
+      } else {
+        addDamageAnim('全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-lg shadow-xl');
+      }
     } else {
       // Clear game!
       setScreen('game_clear');
@@ -870,11 +1008,20 @@ export default function App() {
     // Check level requirement
     if (char.level < skill.levelRequired) return;
 
-    // Healing/Buff skills might target allies, attacks target enemies
-    const isSupport = skill.name === 'オールヒール' || skill.name === 'ツヨクナール' || skill.name === 'ザ・シールド' || skill.name === 'オールシールド' || skill.name === '最終奥義・ザ・モンクレボリューション';
+    // Check ultimate once-per-battle restriction
+    if (skill.name.includes('最終奥義') && char.ultimateUsed) return;
+
+    // Skills that target ALL, SELF or are area attacks do not need target selection
+    const isAutoTarget = skill.name === 'オールヒール' || 
+                        skill.name === 'ザ・シールド' || 
+                        skill.name === 'オールシールド' || 
+                        skill.name === '最終奥義・ザ・モンクレボリューション' || 
+                        skill.name === '最終奥義・エクスプロージョン' || 
+                        skill.name === '最終奥義・シールドブレイカー' || 
+                        skill.name === '回転切り';
     
     setPendingSkill({ charId: char.id, skill });
-    if (isSupport || skill.name === '最終奥義・エクスプロージョン' || skill.name === '最終奥義・シールドブレイカー' || skill.name === '回転切り') {
+    if (isAutoTarget) {
       // Auto target all or self, proceed directly
       submitChosenAction(0);
     } else {
@@ -1145,6 +1292,10 @@ export default function App() {
     const skill = battle.selectedSkills[char.id] as (Skill & { targetIdx?: number });
     if (!skill) return;
 
+    if (skill.name.includes('最終奥義')) {
+      setParty(prev => prev.map(c => c.id === char.id ? { ...c, ultimateUsed: true } : c));
+    }
+
     let targetIdx = skill.targetIdx ?? 0;
     let baseDamage = 0;
     let healingAmount = 0;
@@ -1165,7 +1316,95 @@ export default function App() {
     }
 
     // Process Skills Logic
-    if (skill.name === '回転切り') {
+    if (skill.name === '斬りつける') {
+      baseDamage = 5 * modifier;
+      setBattle((prev) => {
+        const nextEnemies = prev.enemies.map((enemy, idx) => {
+          if (idx === targetIdx) {
+            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+            addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-500 font-bold text-lg');
+            return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
+          }
+          return enemy;
+        });
+        return {
+          ...prev,
+          enemies: nextEnemies,
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+        };
+      });
+    } else if (skill.name === 'ひのこ') {
+      baseDamage = 5 * modifier;
+      setBattle((prev) => {
+        const nextEnemies = prev.enemies.map((enemy, idx) => {
+          if (idx === targetIdx) {
+            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+            addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-orange-500 font-bold text-lg');
+            const isBurned = Math.random() < 0.30;
+            return { 
+              ...enemy, 
+              hp: Math.max(enemy.hp - finalDamage, 0),
+              isBurned: isBurned || (enemy as any).isBurned,
+              burnTurns: isBurned ? 1 : (enemy as any).burnTurns,
+            };
+          }
+          return enemy;
+        });
+        return {
+          ...prev,
+          enemies: nextEnemies,
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+        };
+      });
+    } else if (skill.name === 'たたく') {
+      baseDamage = 3 * modifier;
+      setBattle((prev) => {
+        const nextEnemies = prev.enemies.map((enemy, idx) => {
+          if (idx === targetIdx) {
+            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+            addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-slate-400 font-bold text-md');
+            return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
+          }
+          return enemy;
+        });
+        return {
+          ...prev,
+          enemies: nextEnemies,
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+        };
+      });
+    } else if (skill.name === 'ヒール') {
+      healingAmount = Math.floor(30 * modifier);
+      setParty((prev) => prev.map((c, idx) => {
+        if (idx === targetIdx && !c.isDead) {
+          const nextHp = Math.min(c.hp + healingAmount, c.maxHp);
+          addDamageAnim(`+${healingAmount}`, 20 + idx * 20, 65, 'text-green-400 font-bold text-xl');
+          return { ...c, hp: nextHp };
+        }
+        return c;
+      }));
+      setBattle((prev) => ({
+        ...prev,
+        battleLogs: [...prev.battleLogs, `${char.name} が ${party[targetIdx]?.name} に ${skill.name} をかけた！`],
+      }));
+    } else if (skill.name === '斧で斬る') {
+      baseDamage = 7 * modifier;
+      setBattle((prev) => {
+        const nextEnemies = prev.enemies.map((enemy, idx) => {
+          if (idx === targetIdx) {
+            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+            addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-600 font-bold text-lg');
+            return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
+          }
+          return enemy;
+        });
+        return {
+          ...prev,
+          enemies: nextEnemies,
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+        };
+      });
+    } else if (skill.name === '回転切り') {
       baseDamage = 10 * modifier;
       // Hit target, target-1, target+1
       setBattle((prev) => {
@@ -1359,21 +1598,6 @@ export default function App() {
         ...prev,
         battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
       }));
-    } else if (skill.name === 'ヨワクナール') {
-      setBattle((prev) => {
-        const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            addDamageAnim(`攻撃/防御 20% DOWN`, 20 + idx * 30, 25, 'text-yellow-300 font-bold text-sm');
-            return { ...enemy, isWeakened: true, weakenTurns: 2 };
-          }
-          return enemy;
-        });
-        return {
-          ...prev,
-          enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} が敵に ${skill.name} をかけた！`],
-        };
-      });
     } else if (skill.name === 'ツヨクナール') {
       setParty((prev) => prev.map((c, idx) => {
         if (idx === targetIdx && !c.isDead) {
@@ -1839,7 +2063,7 @@ export default function App() {
   };
 
   const restartWholeGame = () => {
-    setParty(createParty(1));
+    setParty(createParty(2));
     setStageIndex(0);
     setScreen('start');
   };
@@ -1856,27 +2080,125 @@ export default function App() {
     if (kana) {
       const result = checkTypingPrefix(kana, input);
       const remainingKana = kana.slice(result.matchedKanaCount);
-      displayTarget = input + kanaToStandardRoman(remainingKana);
+      const subInput = input.slice(result.matchedInputLen);
+
+      let remainingNextRoman = '';
+      let nextKanaChar = '';
+
+      if (subInput.length > 0 && remainingKana.length > 0) {
+        // Find next kana character
+        if (remainingKana[0] === 'っ') {
+          // Geminate consonant
+          nextKanaChar = remainingKana.slice(0, 2);
+          const nextChar = remainingKana[1];
+          const nextPair = remainingKana.slice(1, 3);
+          const candidates = ROMAN_RULES[nextPair] || ROMAN_RULES[nextChar] || [];
+          for (const cand of candidates) {
+            const consonant = cand[0];
+            if (consonant && !['a', 'i', 'u', 'e', 'o'].includes(consonant)) {
+              const doubleRoman = consonant + cand;
+              if (doubleRoman.startsWith(subInput)) {
+                remainingNextRoman = doubleRoman.slice(subInput.length);
+                break;
+              }
+            }
+          }
+          if (!remainingNextRoman) {
+            const xtsuCandidates = ['xtsu', 'ltsu', 'xtu', 'ltu'];
+            for (const cand of xtsuCandidates) {
+              if (cand.startsWith(subInput)) {
+                remainingNextRoman = cand.slice(subInput.length);
+                break;
+              }
+            }
+          }
+        } else if (remainingKana[0] === 'ん') {
+          nextKanaChar = 'ん';
+          const isLast = remainingKana.length === 1;
+          const nextCharOfKana = !isLast ? remainingKana[1] : '';
+          let needsDoubleN = isLast;
+          if (!isLast) {
+            const nextPair = remainingKana.slice(1, 3);
+            const nextRules = ROMAN_RULES[nextPair] || ROMAN_RULES[nextCharOfKana] || [];
+            const startsWithVowelOrYorN = nextRules.some(r => 
+              ['a', 'i', 'u', 'e', 'o', 'y', 'n'].includes(r[0])
+            );
+            if (startsWithVowelOrYorN) {
+              needsDoubleN = true;
+            }
+          }
+          const cand = needsDoubleN ? 'nn' : 'n';
+          if (cand.startsWith(subInput)) {
+            remainingNextRoman = cand.slice(subInput.length);
+          }
+        } else {
+          // Normal kana
+          if (remainingKana.length >= 2 && ROMAN_RULES[remainingKana.slice(0, 2)]) {
+            nextKanaChar = remainingKana.slice(0, 2);
+          } else {
+            nextKanaChar = remainingKana[0];
+          }
+          const candidates = ROMAN_RULES[nextKanaChar] || [];
+          for (const cand of candidates) {
+            if (cand.startsWith(subInput)) {
+              remainingNextRoman = cand.slice(subInput.length);
+              break;
+            }
+          }
+        }
+      }
+
+      const displayInput = input.replace(/\//g, '・').replace(/ /g, '・');
+
+      if (nextKanaChar) {
+        displayTarget = displayInput + remainingNextRoman + kanaToStandardRoman(remainingKana.slice(nextKanaChar.length));
+      } else {
+        displayTarget = displayInput + kanaToStandardRoman(remainingKana);
+      }
       matchCount = input.length;
     }
 
+    let originalText = '';
+    if (battle.phase === 'action_execute') {
+      const char = party[battle.executingCharIndex];
+      const skill = battle.selectedSkills[char?.id];
+      if (skill) {
+        originalText = skill.name;
+      }
+    } else if (battle.phase === 'enemy_turn' && battle.currentAttack) {
+      originalText = battle.currentAttack.name;
+    }
+
+    if (!originalText && kana) {
+      originalText = kana;
+    }
+
     return (
-      <div className="font-mono text-2xl tracking-wider text-center p-4 bg-slate-900/80 border border-slate-700 rounded-lg shadow-inner max-w-xl mx-auto my-3 relative overflow-hidden">
-        {displayTarget.split('').map((char, index) => {
-          let colorClass = 'text-slate-500';
-          let borderClass = '';
-          if (index < matchCount) {
-            colorClass = 'text-green-400 font-extrabold drop-shadow-[0_0_6px_rgba(74,222,128,0.5)]';
-          } else if (index === matchCount) {
-            colorClass = 'text-yellow-300 animate-pulse font-bold bg-yellow-500/10 rounded';
-            borderClass = 'border-b-2 border-yellow-300';
-          }
-          return (
-            <span key={index} className={`${colorClass} ${borderClass} px-0.5 transition-all`}>
-              {char}
+      <div className="flex flex-col gap-1.5 max-w-xl mx-auto my-3 w-full">
+        {originalText && (
+          <div className="text-center">
+            <span className="text-sm font-bold text-slate-300 bg-slate-950/60 px-3 py-1 rounded-full border border-slate-800 tracking-wide animate-pulse">
+              {originalText}
             </span>
-          );
-        })}
+          </div>
+        )}
+        <div className="font-mono text-2xl tracking-wider text-center p-4 bg-slate-900/80 border border-slate-700 rounded-lg shadow-inner relative overflow-hidden w-full">
+          {displayTarget.split('').map((char, index) => {
+            let colorClass = 'text-slate-500';
+            let borderClass = '';
+            if (index < matchCount) {
+              colorClass = 'text-green-400 font-extrabold drop-shadow-[0_0_6px_rgba(74,222,128,0.5)]';
+            } else if (index === matchCount) {
+              colorClass = 'text-yellow-300 animate-pulse font-bold bg-yellow-500/10 rounded';
+              borderClass = 'border-b-2 border-yellow-300';
+            }
+            return (
+              <span key={index} className={`${colorClass} ${borderClass} px-0.5 transition-all`}>
+                {char}
+              </span>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -1935,7 +2257,7 @@ export default function App() {
       </header>
 
       {/* Main Screen Container */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-6 flex flex-col justify-center">
+      <main className={`flex-1 max-w-5xl w-full mx-auto px-4 pt-3 pb-6 flex flex-col justify-center ${screen === 'battle' && battle.phase === 'battle_result' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         <AnimatePresence mode="wait">
           
           {/* SCREEN: START SCREEN */}
@@ -1945,22 +2267,22 @@ export default function App() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
-              className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-xl mx-auto text-center shadow-2xl relative overflow-hidden"
+              className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-lg mx-auto text-center shadow-2xl relative overflow-hidden"
             >
               <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
               
-              <div className="text-7xl mb-6 select-none animate-bounce">⚔️👑🏰</div>
+              <div className="text-4xl mb-2 select-none animate-bounce">⚔️👑🏰</div>
               
-              <h2 className="text-4xl font-extrabold tracking-tight text-white mb-2 font-mono">
+              <h2 className="text-2xl font-extrabold tracking-tight text-white mb-1 font-mono">
                 タイピング・レジェンド
               </h2>
-              <p className="text-indigo-300 text-sm font-medium mb-6">
+              <p className="text-indigo-300 text-xs font-medium mb-3">
                 ~ 勇者のタイピングで世界を救うコマンドRPG ~
               </p>
 
-              <div className="bg-slate-950 p-4 border border-slate-800 rounded-lg text-left text-sm text-slate-300 space-y-2 mb-8 font-sans">
+              <div className="bg-slate-950 p-3 border border-slate-800 rounded-lg text-left text-[11px] text-slate-300 space-y-1 mb-4 font-sans leading-relaxed">
                 <div className="flex gap-2 font-bold text-indigo-400 border-b border-slate-800 pb-1 items-center">
-                  <Info className="h-4 w-4" /> ゲームの基本ルール
+                  <Info className="h-3.5 w-3.5" /> ゲームの基本ルール
                 </div>
                 <p>・十字キーまたは画面タップで勇者を操作し、マップの敵と戦おう！</p>
                 <p>・戦闘時は、表示されるローマ字を**制限時間内**にタイピングして攻撃！</p>
@@ -1969,12 +2291,12 @@ export default function App() {
                 <p>・各ステージのモンスターを一掃すると次のステージへのポータルが解放！</p>
               </div>
 
-              <div className="grid grid-cols-4 gap-2 mb-8">
-                {createParty(1).map((char) => (
-                  <div key={char.id} className="bg-slate-950 border border-slate-800 p-2.5 rounded-lg text-center">
-                    <span className="text-2xl block mb-1">{char.avatar}</span>
-                    <span className="text-xs font-bold block truncate text-slate-200">{char.name.split(' ')[0]}</span>
-                    <span className="text-[10px] text-indigo-300 bg-indigo-950/40 px-1 py-0.5 rounded border border-indigo-900/50 inline-block mt-1 font-mono">
+              <div className="grid grid-cols-4 gap-2 mb-4">
+                {createParty(2).map((char) => (
+                  <div key={char.id} className="bg-slate-950 border border-slate-800 p-2 rounded-lg text-center">
+                    <span className="text-xl block mb-0.5">{char.avatar}</span>
+                    <span className="text-[10px] font-bold block truncate text-slate-200">{char.name.split(' ')[0]}</span>
+                    <span className="text-[9px] text-indigo-300 bg-indigo-950/40 px-1 py-0.2 rounded border border-indigo-900/30 inline-block mt-0.5 font-mono">
                       {char.role === 'hero' ? '勇者' : char.role === 'mage' ? '魔法使' : char.role === 'priest' ? '僧侶' : '戦士'}
                     </span>
                   </div>
@@ -1986,10 +2308,10 @@ export default function App() {
                   sound.playSuccess();
                   setScreen('explore');
                 }}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold py-4 px-6 rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 active:scale-95 text-lg flex items-center justify-center gap-2"
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold py-2.5 px-4 rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 active:scale-95 text-base flex items-center justify-center gap-1.5"
               >
                 冒険をはじめる
-                <ChevronRight className="h-5 w-5" />
+                <ChevronRight className="h-4 w-4" />
               </button>
             </motion.div>
           )}
@@ -2001,11 +2323,11 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="grid md:grid-cols-3 gap-6 items-start"
+              className="grid md:grid-cols-3 gap-4 items-start"
             >
               {/* Left Column: Map Board */}
-              <div className="md:col-span-2 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl flex flex-col items-center">
-                <div className="w-full flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
+              <div className="md:col-span-2 bg-slate-900 border border-slate-800 p-3 rounded-xl shadow-xl flex flex-col items-center">
+                <div className="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
                   <div className="flex items-center gap-2">
                     <Compass className="h-5 w-5 text-indigo-400" />
                     <span className="font-extrabold text-white">2Dエリアマップ</span>
@@ -2016,7 +2338,23 @@ export default function App() {
                 </div>
 
                 {/* 2D Map Grid (9x9) */}
-                <div className={`grid grid-cols-9 gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden w-full max-w-md aspect-square ${STAGES[stageIndex]?.bgColor}`}>
+                <div className={`relative grid grid-cols-9 gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden w-full max-w-sm aspect-square ${STAGES[stageIndex]?.bgColor}`}>
+                  <AnimatePresence>
+                    {portalAlert && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        className="absolute inset-x-4 top-1/2 -translate-y-1/2 bg-slate-950/95 border-2 border-amber-500 rounded-xl p-4 shadow-2xl z-30 flex flex-col items-center justify-center text-center pointer-events-none"
+                      >
+                        <span className="text-3xl mb-1">🔒</span>
+                        <span className="text-sm font-bold text-amber-400 whitespace-nowrap">
+                          先にすべてのモンスターを倒して！
+                        </span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {Array.from({ length: 9 }).map((_, rIdx) => (
                     <React.Fragment key={rIdx}>
                       {Array.from({ length: 9 }).map((_, cIdx) => {
@@ -2115,22 +2453,22 @@ export default function App() {
               </div>
 
               {/* Right Column: Party Summary & Instructions */}
-              <div className="space-y-4">
-                <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl">
-                  <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-2">
-                    <Heart className="h-5 w-5 text-rose-500 animate-pulse" />
-                    <span className="font-extrabold text-white">現在のパーティー状態</span>
+              <div className="space-y-3">
+                <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl shadow-xl">
+                  <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-1.5">
+                    <Heart className="h-4 w-4 text-rose-500 animate-pulse" />
+                    <span className="font-extrabold text-white text-sm">現在のパーティー状態</span>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-1.5">
                     {party.map((char) => (
-                      <div key={char.id} className="bg-slate-950/60 p-3 border border-slate-800 rounded-xl relative overflow-hidden">
-                        <div className="flex justify-between items-start mb-1.5">
+                      <div key={char.id} className="bg-slate-950/60 p-2 border border-slate-800 rounded-lg relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-xl">{char.avatar}</span>
+                            <span className="text-lg">{char.avatar}</span>
                             <div>
                               <span className="text-xs font-bold text-slate-200 block leading-tight">{char.name.split(' ')[0]}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">LV {char.level}</span>
+                              <span className="text-[9px] text-slate-400 font-mono">LV {char.level}</span>
                             </div>
                           </div>
                           <span className={`text-xs font-bold font-mono ${char.isDead ? 'text-rose-500' : 'text-slate-200'}`}>
@@ -2139,7 +2477,7 @@ export default function App() {
                         </div>
                         
                         {/* HP Bar */}
-                        <div className="w-full bg-slate-850 h-2.5 rounded-full overflow-hidden border border-slate-800">
+                        <div className="w-full bg-slate-850 h-2 rounded-full overflow-hidden border border-slate-800">
                           <div
                             className={`h-full transition-all duration-300 ${
                               char.isDead ? 'bg-transparent' : char.hp / char.maxHp < 0.3 ? 'bg-rose-500' : 'bg-emerald-500'
@@ -2151,8 +2489,8 @@ export default function App() {
                         {/* Shields or custom ultimate counts */}
                         {char.shield > 0 && (
                           <div className="mt-1 flex items-center gap-1">
-                            <span className="text-[10px] bg-blue-950/40 text-blue-400 border border-blue-900/60 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-mono">
-                              🛡️ シールド: +{char.shield}
+                            <span className="text-[9px] bg-blue-950/40 text-blue-400 border border-blue-900/60 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-mono">
+                              🛡️ +{char.shield}
                             </span>
                           </div>
                         )}
@@ -2161,13 +2499,13 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-indigo-950/20 border border-indigo-900/40 p-5 rounded-2xl">
-                  <h3 className="text-sm font-bold text-indigo-300 mb-2 flex items-center gap-1">
-                    <Sparkles className="h-4 w-4" /> ステージ遷移のルール
+                <div className="bg-indigo-950/20 border border-indigo-900/40 p-3 rounded-xl">
+                  <h3 className="text-xs font-bold text-indigo-300 mb-1 flex items-center gap-1">
+                    <Sparkles className="h-3.5 w-3.5" /> ステージ遷移のルール
                   </h3>
-                  <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                  <p className="text-[11px] text-slate-300 leading-normal font-sans">
                     すべての 👾 モンスターを討伐すると、北に配置されているポータル 🔮 が起動します。
-                    ポータルを踏むと次のステージへ進むことができ、進んだ瞬間に**レベルアップ & 死亡含む全員の体力が全回復**します！
+                    ポータルを踏むと次のステージへ進み、全員の体力が全回復します！
                   </p>
                 </div>
               </div>
@@ -2182,14 +2520,14 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.02 }}
-              className="space-y-6"
+              className="space-y-4"
             >
               {/* Battle Arena View (Split Row: Monsters & Player Party) */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[350px]">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[260px]">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-950/30 pointer-events-none"></div>
 
                 {/* Upper row: Enemies */}
-                <div className="flex justify-around items-center py-4 relative z-10 gap-4">
+                <div className="flex justify-around items-center py-2 relative z-10 gap-2">
                   {battle.enemies.map((enemy, idx) => {
                     const isTargeted = isChoosingTarget && pendingSkill;
                     const isWeak = (enemy as any).isWeakened;
@@ -2199,7 +2537,7 @@ export default function App() {
                     return (
                       <motion.div
                         key={`${enemy.name}-${idx}`}
-                        className={`p-4 border rounded-xl flex flex-col items-center w-40 text-center transition-all relative ${
+                        className={`p-2 border rounded-lg flex flex-col items-center w-32 text-center transition-all relative ${
                           enemy.hp <= 0 ? 'opacity-20 border-slate-800 bg-slate-950/30' : 'bg-slate-950 border-slate-800'
                         } ${isTargeted && enemy.hp > 0 ? 'ring-4 ring-indigo-500 animate-pulse cursor-pointer' : ''}`}
                         onClick={() => {
@@ -2217,12 +2555,12 @@ export default function App() {
 
                         {/* Active Attack Pointer */}
                         {battle.phase === 'enemy_turn' && battle.enemyAttackingIndex === idx && (
-                          <div className="absolute -top-8 text-rose-500 font-extrabold animate-bounce text-sm bg-rose-950 px-2 py-0.5 rounded border border-rose-800 shadow">
+                          <div className="absolute -top-7 text-rose-500 font-extrabold animate-bounce text-xs bg-rose-950 px-2 py-0.5 rounded border border-rose-800 shadow">
                             攻撃中！🗡️
                           </div>
                         )}
 
-                        <span className="text-5xl block mb-2">{enemy.hp > 0 ? enemy.avatar : '💀'}</span>
+                        <span className="text-3xl block mb-1">{enemy.hp > 0 ? enemy.avatar : '💀'}</span>
                         <span className="text-xs font-extrabold block text-slate-200 leading-tight">{enemy.name}</span>
                         <span className="text-[10px] text-slate-500 font-mono">({enemy.romanName})</span>
 
@@ -2251,17 +2589,17 @@ export default function App() {
                 </div>
 
                 {/* Lower row: Player Party Members */}
-                <div className="flex justify-around items-center py-3 relative z-10 gap-2">
+                <div className={`flex justify-around items-center py-1.5 relative z-10 gap-2 ${battle.phase === 'battle_result' ? 'hidden' : ''}`}>
                   {party.map((char, idx) => {
                     const isTargetedForSupport = isChoosingTarget && pendingSkill && 
-                      (pendingSkill.skill.name === 'ツヨクナール');
+                      (pendingSkill.skill.name === 'ツヨクナール' || pendingSkill.skill.name === 'ヒール');
                     const isProvoking = char.provokeTurns > 0;
                     const isUltimateCharging = char.ultimateCooldown > 0;
 
                     return (
                       <div
                         key={char.id}
-                        className={`p-3 border rounded-xl flex flex-col items-center w-36 text-center transition-all relative ${
+                        className={`p-2 border rounded-lg flex flex-col items-center w-28 text-center transition-all relative ${
                           char.isDead ? 'border-red-900 bg-red-950/10 opacity-30' : 'bg-slate-950 border-slate-800'
                         } ${
                           battle.phase === 'action_select' && battle.currentCharIndex === idx && !char.isDead
@@ -2294,12 +2632,12 @@ export default function App() {
                           </div>
                         )}
 
-                        <span className="text-3xl block mb-1">{char.isDead ? '💀' : char.avatar}</span>
+                        <span className="text-2xl block mb-0.5">{char.isDead ? '💀' : char.avatar}</span>
                         <span className="text-xs font-bold block text-slate-200 leading-tight">{char.name.split(' ')[0]}</span>
                         <span className="text-[9px] text-slate-500 font-mono">LV {char.level}</span>
 
                         {/* HP status value */}
-                        <span className="text-[10px] font-mono font-bold mt-1.5 text-slate-300">
+                        <span className="text-[10px] font-mono font-bold mt-1 text-slate-300">
                           {char.hp} / {char.maxHp}
                         </span>
 
@@ -2335,14 +2673,14 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4"
+                    className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xl space-y-2"
                   >
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-xl">{party[battle.currentCharIndex]?.avatar}</span>
+                        <span className="text-lg">{party[battle.currentCharIndex]?.avatar}</span>
                         <div>
-                          <span className="font-extrabold text-white text-sm">{party[battle.currentCharIndex]?.name}</span>
-                          <span className="text-xs text-slate-400 block font-mono">行動コマンド選択</span>
+                          <span className="font-extrabold text-white text-xs">{party[battle.currentCharIndex]?.name}</span>
+                          <span className="text-[10px] text-slate-400 block font-mono">行動コマンド選択</span>
                         </div>
                       </div>
                       
@@ -2352,42 +2690,45 @@ export default function App() {
                             setIsChoosingTarget(false);
                             setPendingSkill(null);
                           }}
-                          className="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1 text-slate-300"
+                          className="text-[10px] bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded flex items-center gap-1 text-slate-300"
                         >
-                          <Undo2 className="h-3.5 w-3.5" /> 選択し直す
+                          <Undo2 className="h-3 w-3" /> 選択し直す
                         </button>
                       )}
                     </div>
 
                     {!isChoosingTarget ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {party[battle.currentCharIndex]?.skills.map((skill) => {
-                          const meetsReq = party[battle.currentCharIndex].level >= skill.levelRequired;
+                          const meetsReq = party[battle.currentCharIndex].level >= skill.levelRequired &&
+                            (!skill.name.includes('最終奥義') || !party[battle.currentCharIndex].ultimateUsed);
                           return (
                             <button
                               key={skill.name}
                               disabled={!meetsReq}
                               onClick={() => selectSkillForChar(skill)}
-                              className={`p-3 rounded-xl border text-left transition-all relative overflow-hidden group flex flex-col justify-between h-22 ${
+                              className={`p-2 rounded-lg border text-left transition-all relative overflow-hidden group flex flex-col justify-between h-18 ${
                                 meetsReq
                                   ? 'bg-slate-950 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900/60'
                                   : 'bg-slate-950/20 border-slate-900/50 opacity-40 cursor-not-allowed'
                               }`}
                             >
                               <div className="flex justify-between items-start w-full">
-                                <span className={`text-sm font-bold ${meetsReq ? 'text-indigo-300' : 'text-slate-500'}`}>
+                                <span className={`text-xs font-bold ${meetsReq ? 'text-indigo-300' : 'text-slate-500'}`}>
                                   {skill.name}
                                 </span>
-                                <span className="text-[10px] text-slate-500 font-mono">
+                                <span className="text-[9px] text-slate-500 font-mono">
                                   {skill.roman}
                                 </span>
                               </div>
-                              <p className="text-xs text-slate-400 font-sans line-clamp-2 mt-1 leading-relaxed">
+                              <p className="text-[10px] text-slate-400 font-sans line-clamp-1 mt-0.5 leading-relaxed">
                                 {skill.desc}
                               </p>
                               {!meetsReq && (
-                                <span className="absolute inset-0 bg-slate-950/90 flex items-center justify-center font-bold text-xs text-rose-400 font-mono border border-slate-800">
-                                  レベル {skill.levelRequired} で解放
+                                <span className="absolute inset-0 bg-slate-950/90 flex items-center justify-center font-bold text-[10px] text-rose-400 font-mono border border-slate-800 text-center px-1">
+                                  {party[battle.currentCharIndex].level < skill.levelRequired 
+                                    ? `レベル ${skill.levelRequired} で解放` 
+                                    : '最終奥義は1回のみ使用可能'}
                                 </span>
                               )}
                             </button>
@@ -2395,10 +2736,10 @@ export default function App() {
                         })}
                       </div>
                     ) : (
-                      <div className="p-8 text-center bg-slate-950 border border-slate-800 rounded-xl">
-                        <span className="text-3xl block animate-bounce mb-3">🎯</span>
-                        <h4 className="font-extrabold text-white mb-1 text-base">対象（ターゲット）を選択してください</h4>
-                        <p className="text-xs text-slate-400">
+                      <div className="p-4 text-center bg-slate-950 border border-slate-800 rounded-lg">
+                        <span className="text-xl block animate-bounce mb-1">🎯</span>
+                        <h4 className="font-extrabold text-white mb-0.5 text-xs">対象（ターゲット）を選択してください</h4>
+                        <p className="text-[10px] text-slate-400">
                           上部の戦場画面にいるモンスター、あるいはパーティーメンバーを直接タップしてください。
                         </p>
                       </div>
@@ -2413,7 +2754,7 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.96 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 1.04 }}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden text-center space-y-4"
+                    className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl relative overflow-hidden text-center space-y-2"
                   >
                     {/* Progress limit bar */}
                     <div className="absolute top-0 inset-x-0 h-1.5 bg-slate-950 overflow-hidden">
@@ -2423,7 +2764,7 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                       {battle.phase === 'action_execute' ? (
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">{party[battle.executingCharIndex]?.avatar}</span>
