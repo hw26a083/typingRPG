@@ -1,4 +1,9 @@
+@import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-dela: "Dela Gothic One", sans-serif;
+}
 
 /* Hide scrollbars across all elements and browsers */
 * {

@@ -138,7 +138,7 @@ const sound = new SoundController();
 const createParty = (level: number = 1): Character[] => [
   {
     id: 'hero',
-    name: '勇者 (男の子)',
+    name: '勇者',
     role: 'hero',
     avatar: '👦',
     maxHp: 100,
@@ -151,10 +151,11 @@ const createParty = (level: number = 1): Character[] => [
     provokeTurns: 0,
     ultimateCooldown: 0,
     shield: 0,
+    skillCooldowns: {},
   },
   {
     id: 'mage',
-    name: '魔法使い (女性)',
+    name: '魔法使い',
     role: 'mage',
     avatar: '👧',
     maxHp: 70,
@@ -167,10 +168,11 @@ const createParty = (level: number = 1): Character[] => [
     provokeTurns: 0,
     ultimateCooldown: 0,
     shield: 0,
+    skillCooldowns: {},
   },
   {
     id: 'priest',
-    name: '僧侶 (老人)',
+    name: '僧侶',
     role: 'priest',
     avatar: '👴',
     maxHp: 80,
@@ -183,10 +185,11 @@ const createParty = (level: number = 1): Character[] => [
     provokeTurns: 0,
     ultimateCooldown: 0,
     shield: 0,
+    skillCooldowns: {},
   },
   {
     id: 'warrior',
-    name: '戦士 (屈強な男)',
+    name: '戦士',
     role: 'warrior',
     avatar: '🧔',
     maxHp: 120,
@@ -199,6 +202,7 @@ const createParty = (level: number = 1): Character[] => [
     provokeTurns: 0,
     ultimateCooldown: 0,
     shield: 0,
+    skillCooldowns: {},
   },
 ];
 
@@ -564,8 +568,9 @@ function checkTypingPrefix(kana: string, input: string): {
     }
     
     const singleChar = remainingKana[0];
+    const isNextSmallChar = remainingKana.length >= 2 && ['ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ', 'ゃ', 'ゅ', 'ょ', 'ゎ'].includes(remainingKana[1]);
     const candidates = ROMAN_RULES[singleChar];
-    if (candidates) {
+    if (candidates && !isNextSmallChar) {
       for (const cand of candidates) {
         if (inputPart.startsWith(cand)) {
           queue.push({ 
@@ -672,9 +677,32 @@ export default function App() {
   // Game General State
   const [screen, setScreen] = useState<'start' | 'explore' | 'battle' | 'game_clear'>('start');
   const [stageIndex, setStageIndex] = useState<number>(0);
-  const [party, setParty] = useState<Character[]>(createParty(2));
+  const [party, setParty] = useState<Character[]>(createParty(1));
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [portalAlert, setPortalAlert] = useState<boolean>(false);
+  const [testMode, setTestMode] = useState<boolean>(false);
+  const [isKKeyPressed, setIsKKeyPressed] = useState<boolean>(false);
+  const isTransitioningRef = useRef(false);
+
+  // Keyboard tracking for K key (to toggle test mode on click)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'k' || e.key === 'K') {
+        setIsKKeyPressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'k' || e.key === 'K') {
+        setIsKKeyPressed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // Stats over the entire game
   const [globalStats, setGlobalStats] = useState<TypingStats>({
@@ -733,6 +761,10 @@ export default function App() {
   const [isChoosingTarget, setIsChoosingTarget] = useState<boolean>(false);
   const [pendingSkill, setPendingSkill] = useState<{ charId: string, skill: Skill } | null>(null);
 
+  // Keyboard navigation helpers for Battle
+  const [focusedSkillIndex, setFocusedSkillIndex] = useState<number>(0);
+  const [focusedTargetIndex, setFocusedTargetIndex] = useState<number>(0);
+
   // Floating damage text animations
   const [damageAnimations, setDamageAnimations] = useState<{ id: number; text: string; x: number; y: number; colorClass: string }[]>([]);
   const animCounter = useRef<number>(0);
@@ -763,11 +795,18 @@ export default function App() {
     const usedPositions = new Set<string>();
     usedPositions.add('4,7'); // Player start position
 
-    // Add 3 monster spawns
+    // Add monster spawns (Stage 5 has only 1 boss monster)
+    const isStage5 = stageIndex === 4;
+    const monsterCount = isStage5 ? 1 : 3;
     const templates = currentStage.monsterTemplates;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < monsterCount; i++) {
       let mx = Math.floor(Math.random() * 9);
       let my = Math.floor(Math.random() * 6); // Keep monsters slightly upper
+      if (isStage5) {
+        // Center the boss on Stage 5
+        mx = 4;
+        my = 3;
+      }
       let posKey = `${mx},${my}`;
       while (usedPositions.has(posKey)) {
         mx = Math.floor(Math.random() * 9);
@@ -776,15 +815,26 @@ export default function App() {
       }
       usedPositions.add(posKey);
       
-      const t = templates[i % templates.length];
-      entities.push({
-        id: `monster-${i}`,
-        type: 'monster',
-        x: mx,
-        y: my,
-        avatar: t.avatar,
-        label: t.name,
-      });
+      if (isStage5) {
+        entities.push({
+          id: `monster-${i}`,
+          type: 'monster',
+          x: mx,
+          y: my,
+          avatar: BOSS_TEMPLATE.avatar,
+          label: BOSS_TEMPLATE.name,
+        });
+      } else {
+        const t = templates[i % templates.length];
+        entities.push({
+          id: `monster-${i}`,
+          type: 'monster',
+          x: mx,
+          y: my,
+          avatar: t.avatar,
+          label: t.name,
+        });
+      }
     }
 
     // Portal (glowing crystal or door) at top center
@@ -807,7 +857,8 @@ export default function App() {
       let ox = Math.floor(Math.random() * 9);
       let oy = Math.floor(Math.random() * 8);
       let posKey = `${ox},${oy}`;
-      if (!usedPositions.has(posKey) && oy !== 7) { // Leave room near start
+      const isReserved = (ox === 4 && oy === 0) || (ox === 4 && oy === 1) || (ox === 4 && oy === 7) || (ox === 4 && oy === 6);
+      if (!usedPositions.has(posKey) && oy !== 7 && !isReserved) {
         usedPositions.add(posKey);
         entities.push({
           id: `obstacle-${i}`,
@@ -821,6 +872,7 @@ export default function App() {
 
     setMapEntities(entities);
     setPlayerPos({ x: 4, y: 7 });
+    isTransitioningRef.current = false;
   }, [stageIndex]);
 
   // Track global timer
@@ -856,18 +908,20 @@ export default function App() {
       const touchedPortal = mapEntities.find(
         (e) => e.x === nextX && e.y === nextY && e.type === 'portal'
       );
-      if (touchedPortal) {
-        // Only allow progression if no monsters remain on map
-        const activeMonsters = mapEntities.filter((e) => e.type === 'monster');
-        if (activeMonsters.length > 0) {
+      if (touchedPortal && !isTransitioningRef.current) {
+        // Prevent progressing if there are remaining monsters
+        const hasMonsters = mapEntities.some((e) => e.type === 'monster');
+        if (hasMonsters) {
           setPortalAlert(true);
-          setTimeout(() => setPortalAlert(false), 1800);
-          sound.playKeyWrong();
+          setTimeout(() => setPortalAlert(false), 2000);
           return prev;
-        } else {
-          // Go to next stage
-          goToNextStage();
         }
+
+        // Remove portal instantly to prevent double-triggering
+        setMapEntities((oldEntities) => oldEntities.filter((e) => e.type !== 'portal'));
+        // Go to next stage immediately
+        goToNextStage();
+        return prev;
       }
 
       return { x: nextX, y: nextY };
@@ -902,8 +956,8 @@ export default function App() {
       failedTypings: 0,
     });
 
-    if (currentStage.number === 4 && mapEntities.filter((e) => e.type === 'monster').length === 1 && monsterEntity.id === 'monster-0') {
-      // If it's the last stage, and final monster, spawn Demon King!
+    if (currentStage.number === 5) {
+      // Stage 5 has only the Demon King! Spawn him directly.
       spawnedEnemies = [JSON.parse(JSON.stringify(BOSS_TEMPLATE))];
       // Party levels up to 5 and fully recovers for the final boss!
       setParty((prev) => 
@@ -919,16 +973,27 @@ export default function App() {
           shield: 0,
         }))
       );
-      addDamageAnim('魔王降臨！ 全員レベル5になり、最終奥義が解放された！', 50, 45, 'text-purple-400 font-extrabold bg-slate-900/95 px-4 py-3 border-2 border-purple-500 rounded text-lg shadow-xl');
     } else {
-      // Spawn random 1 or 2 monsters of this stage template
-      const templateNames = currentStage.monsterTemplates;
+      // Always spawn the monster that player touched on the map as the first enemy!
+      const matchedTemplate = currentStage.monsterTemplates.find(t => t.name === monsterEntity.label);
+      if (matchedTemplate) {
+        spawnedEnemies.push(JSON.parse(JSON.stringify(matchedTemplate)));
+      } else {
+        const randTemplate = currentStage.monsterTemplates[0];
+        spawnedEnemies.push(JSON.parse(JSON.stringify(randTemplate)));
+      }
+
+      // If we spawn 2 enemies, choose another random one
       const amount = Math.random() > 0.4 ? 2 : 1;
-      for (let i = 0; i < amount; i++) {
+      if (amount === 2) {
+        const templateNames = currentStage.monsterTemplates;
         const randTemplate = templateNames[Math.floor(Math.random() * templateNames.length)];
         spawnedEnemies.push(JSON.parse(JSON.stringify(randTemplate)));
       }
     }
+
+    const isBossFight = spawnedEnemies.some(e => e.name === '魔王');
+    const spawnText = isBossFight ? '魔王が現れた！' : `野生の ${spawnedEnemies.map(e => e.name).join('と')} が現れた！`;
 
     // Set first character to start action select
     setBattle({
@@ -946,7 +1011,7 @@ export default function App() {
       typingStartTime: 0,
       typingLimitTime: 5,
       typingMistakeCount: 0,
-      battleLogs: [`野生の ${spawnedEnemies.map(e => e.name).join('と')} が現れた！`],
+      battleLogs: [spawnText],
     });
 
     // Remove this monster from map
@@ -963,33 +1028,63 @@ export default function App() {
     return 0;
   };
 
+  const getExecutionOrder = (partyList: Character[], selectedSkills: { [charId: string]: Skill }): number[] => {
+    const indices = partyList.map((_, i) => i);
+    const supportSkills = [
+      'ヒール',
+      'オールヒール',
+      'ツヨクナール',
+      '最終奥義・ザ・モンクレボリューション',
+      'ザ・シールド',
+      '挑発',
+      'オールシールド',
+      '最終奥義・シールドブレイカー'
+    ];
+    const isSupport = (idx: number) => {
+      const char = partyList[idx];
+      const skill = selectedSkills[char.id];
+      return skill && supportSkills.includes(skill.name);
+    };
+
+    const supportIndices = indices.filter(idx => isSupport(idx));
+    const offensiveIndices = indices.filter(idx => !isSupport(idx));
+    return [...supportIndices, ...offensiveIndices];
+  };
+
   const goToNextStage = () => {
-    if (stageIndex < 3) {
+    if (isTransitioningRef.current) return;
+    isTransitioningRef.current = true;
+    if (stageIndex < 4) {
       sound.playLevelUp();
       const nextIdx = stageIndex + 1;
       setStageIndex(nextIdx);
       
-      // Stage 3 to Stage 4 (index 3) does not increase level. They level up to 5 at Boss.
-      const shouldLevelUp = nextIdx < 3;
+      // Every stage transition increases level up to 4 (stages 2, 3, 4). Boss fight levels up to 5.
+      const shouldLevelUp = nextIdx < 4;
 
-      // Party fully recovers and levels up!
+      // Party fully recovers and levels up! Also stage transition increases max HP by 20!
       setParty((prev) => 
-        prev.map((char) => ({
-          ...char,
-          level: shouldLevelUp ? char.level + 1 : char.level,
-          hp: char.maxHp,
-          isDead: false,
-          atkBuff: 1.0,
-          defBuff: 1.0,
-          provokeTurns: 0,
-          ultimateCooldown: 0,
-          shield: 0,
-        }))
+        prev.map((char) => {
+          const nextMaxHp = char.maxHp + 20;
+          return {
+            ...char,
+            maxHp: nextMaxHp,
+            level: shouldLevelUp ? char.level + 1 : char.level,
+            hp: nextMaxHp,
+            isDead: false,
+            atkBuff: 1.0,
+            defBuff: 1.0,
+            provokeTurns: 0,
+            ultimateCooldown: 0,
+            shield: 0,
+            skillCooldowns: {}, // Reset cooldowns on new stage
+          };
+        })
       );
       if (shouldLevelUp) {
-        addDamageAnim('レベルアップ！ 全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-lg shadow-xl');
+        addDamageAnim('レベルアップ！ 全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-base sm:text-lg shadow-xl max-w-[90vw] text-center whitespace-normal break-words');
       } else {
-        addDamageAnim('全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-lg shadow-xl');
+        addDamageAnim('全員完全回復！', 50, 45, 'text-green-400 font-bold bg-slate-900/90 px-4 py-2 border-2 border-green-500 rounded text-base sm:text-lg shadow-xl max-w-[90vw] text-center whitespace-normal break-words');
       }
     } else {
       // Clear game!
@@ -1006,10 +1101,14 @@ export default function App() {
     const char = party[battle.currentCharIndex];
     
     // Check level requirement
-    if (char.level < skill.levelRequired) return;
+    if (!testMode && char.level < skill.levelRequired) return;
 
     // Check ultimate once-per-battle restriction
     if (skill.name.includes('最終奥義') && char.ultimateUsed) return;
+
+    // Check skill cooldown
+    const cooldown = char.skillCooldowns?.[skill.name] || 0;
+    if (cooldown > 0) return;
 
     // Skills that target ALL, SELF or are area attacks do not need target selection
     const isAutoTarget = skill.name === 'オールヒール' || 
@@ -1017,22 +1116,45 @@ export default function App() {
                         skill.name === 'オールシールド' || 
                         skill.name === '最終奥義・ザ・モンクレボリューション' || 
                         skill.name === '最終奥義・エクスプロージョン' || 
-                        skill.name === '最終奥義・シールドブレイカー' || 
-                        skill.name === '回転切り';
+                        skill.name === '最終奥義・シールドブレイカー';
     
-    setPendingSkill({ charId: char.id, skill });
+    const pending = { charId: char.id, skill };
+    setPendingSkill(pending);
     if (isAutoTarget) {
       // Auto target all or self, proceed directly
-      submitChosenAction(0);
+      submitChosenAction(0, pending);
     } else {
       // Needs targeting an enemy or an ally
       setIsChoosingTarget(true);
     }
   };
 
-  const submitChosenAction = (targetIndex: number) => {
-    if (!pendingSkill) return;
-    const { charId, skill } = pendingSkill;
+  const submitChosenAction = (targetIndex: number, overridePending?: { charId: string, skill: Skill }) => {
+    console.log("submitChosenAction called with targetIndex:", targetIndex, "overridePending:", overridePending, "pendingSkill:", pendingSkill);
+    let activePending = overridePending || pendingSkill;
+    if (!activePending) {
+      // Fallback: Use currentCharIndex and focusedSkillIndex
+      const char = party[battle.currentCharIndex];
+      if (char) {
+        const availableSkills = char.skills;
+        const skill = availableSkills[focusedSkillIndex];
+        if (skill) {
+          // Check requirement & cooldown in fallback as well
+          const cooldown = char.skillCooldowns?.[skill.name] || 0;
+          if (!testMode && char.level < skill.levelRequired) return;
+          if (skill.name.includes('最終奥義') && char.ultimateUsed) return;
+          if (cooldown > 0) return;
+
+          activePending = { charId: char.id, skill };
+          console.warn("Fallback pendingSkill used:", activePending);
+        }
+      }
+    }
+    if (!activePending) {
+      console.error("submitChosenAction failed: No active pending skill found!");
+      return;
+    }
+    const { charId, skill } = activePending;
 
     // Attach target index directly as property
     const skillWithTarget = { ...skill, targetIdx: targetIndex };
@@ -1056,11 +1178,19 @@ export default function App() {
       } else {
         // All alive characters have selected actions. Start the execution phase!
         setTimeout(() => startExecutionPhase(), 100);
+        const order = getExecutionOrder(party, nextSkills);
+        let firstExecIdx = getFirstAliveCharIndex();
+        for (const idx of order) {
+          if (!party[idx].isDead && nextSkills[party[idx].id]) {
+            firstExecIdx = idx;
+            break;
+          }
+        }
         return {
           ...prev,
           selectedSkills: nextSkills,
           phase: 'action_execute',
-          executingCharIndex: getFirstAliveCharIndex(),
+          executingCharIndex: firstExecIdx,
           typingTarget: '',
           typingInput: '',
         };
@@ -1081,7 +1211,7 @@ export default function App() {
         return { ...prev };
       }
 
-      const limit = selectedSkill.roman.length * 1.0 + 1.5;
+      const limit = selectedSkill.roman.length * 0.5 + 1.5;
 
       return {
         ...prev,
@@ -1093,6 +1223,206 @@ export default function App() {
       };
     });
   };
+
+  // キーボードイベントで常に最新のステートを参照するためのRef
+  const stateRef = useRef({
+    screen,
+    battle,
+    isChoosingTarget,
+    focusedSkillIndex,
+    focusedTargetIndex,
+    pendingSkill,
+    party,
+  });
+
+  const selectSkillRef = useRef(selectSkillForChar);
+  const submitActionRef = useRef(submitChosenAction);
+
+  useEffect(() => {
+    stateRef.current = {
+      screen,
+      battle,
+      isChoosingTarget,
+      focusedSkillIndex,
+      focusedTargetIndex,
+      pendingSkill,
+      party,
+    };
+    selectSkillRef.current = selectSkillForChar;
+    submitActionRef.current = submitChosenAction;
+  });
+
+  // 手番やフェーズが変わった時に、初期フォーカスを設定する
+  useEffect(() => {
+    if (battle.phase === 'action_select') {
+      setFocusedSkillIndex(0);
+      
+      const isSupport = pendingSkill && (pendingSkill.skill.name === 'ツヨクナール' || pendingSkill.skill.name === 'ヒール');
+      if (isChoosingTarget) {
+        if (isSupport) {
+          const firstAliveCharIdx = party.findIndex(c => !c.isDead);
+          setFocusedTargetIndex(firstAliveCharIdx !== -1 ? firstAliveCharIdx : 0);
+        } else {
+          const firstAliveEnemyIdx = battle.enemies.findIndex(e => e.hp > 0);
+          setFocusedTargetIndex(firstAliveEnemyIdx !== -1 ? firstAliveEnemyIdx : 0);
+        }
+      }
+    }
+  }, [battle.phase, battle.currentCharIndex, isChoosingTarget, pendingSkill, party, battle.enemies]);
+
+  // 行動コマンド＆ターゲット選択のキーボードハンドラー
+  useEffect(() => {
+    if (screen !== 'battle') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const {
+        battle: currentBattle,
+        isChoosingTarget: currentIsChoosingTarget,
+        focusedSkillIndex: currentFocusedSkillIndex,
+        focusedTargetIndex: currentFocusedTargetIndex,
+        pendingSkill: currentPendingSkill,
+        party: currentParty,
+      } = stateRef.current;
+
+      if (currentBattle.phase === 'battle_result') {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          sound.playSuccess();
+          setScreen('explore');
+        }
+        return;
+      }
+
+      if (currentBattle.phase === 'game_over') {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          sound.playSuccess();
+          restartCurrentStage();
+        }
+        return;
+      }
+
+      if (currentBattle.phase !== 'action_select') return;
+
+      const char = currentParty[currentBattle.currentCharIndex];
+      if (!char) return;
+
+      const availableSkills = char.skills;
+      const meetsSkillReq = (skill: Skill) => {
+        const cooldown = char.skillCooldowns?.[skill.name] || 0;
+        return (testMode || char.level >= skill.levelRequired) &&
+          (!skill.name.includes('最終奥義') || !char.ultimateUsed) &&
+          cooldown === 0;
+      };
+
+      if (!currentIsChoosingTarget) {
+        // --- 行動コマンド（スキル）選択フェーズ ---
+        const skillCount = availableSkills.length;
+        if (skillCount === 0) return;
+
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 's', 'a', 'd', 'W', 'S', 'A', 'D', ' ', 'Enter'].includes(e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+
+        let nextIdx = currentFocusedSkillIndex;
+
+        if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+          if (nextIdx >= 2) nextIdx -= 2;
+        } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+          if (nextIdx + 2 < skillCount) nextIdx += 2;
+        } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+          if (nextIdx % 2 === 1) nextIdx -= 1;
+        } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+          if (nextIdx % 2 === 0 && nextIdx + 1 < skillCount) nextIdx += 1;
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+          const selectedSkill = availableSkills[currentFocusedSkillIndex];
+          if (selectedSkill && meetsSkillReq(selectedSkill)) {
+            sound.playSuccess();
+            selectSkillRef.current(selectedSkill);
+          } else {
+            sound.playKeyWrong();
+          }
+          return;
+        }
+
+        setFocusedSkillIndex(nextIdx);
+
+      } else {
+        // --- 対象（ターゲット）選択フェーズ ---
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 's', 'a', 'd', 'W', 'S', 'A', 'D', ' ', 'Enter', 'Escape', 'Backspace'].includes(e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+
+        if (e.key === 'Escape' || e.key === 'Backspace') {
+          sound.playKeyWrong();
+          setIsChoosingTarget(false);
+          setPendingSkill(null);
+          return;
+        }
+
+        const activeSkill = currentPendingSkill?.skill || currentParty[currentBattle.currentCharIndex]?.skills[currentFocusedSkillIndex];
+        const isSupport = activeSkill && (activeSkill.name === 'ツヨクナール' || activeSkill.name === 'ヒール');
+
+        console.log("Target choosing phase active. Key:", e.key, "isSupport:", isSupport, "activeSkill:", activeSkill?.name);
+
+        if (isSupport) {
+          const targets = currentParty;
+          const aliveIndices = targets.map((c, i) => (!c.isDead ? i : -1)).filter(i => i !== -1);
+          if (aliveIndices.length === 0) return;
+
+          let currentPosInAlive = aliveIndices.indexOf(currentFocusedTargetIndex);
+          if (currentPosInAlive === -1) currentPosInAlive = 0;
+
+          if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+            currentPosInAlive = (currentPosInAlive - 1 + aliveIndices.length) % aliveIndices.length;
+          } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+            currentPosInAlive = (currentPosInAlive + 1) % aliveIndices.length;
+          } else if (e.key === 'Enter' || e.key === ' ') {
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
+            sound.playSuccess();
+            console.log("Submitting ally target. Index:", aliveIndices[currentPosInAlive]);
+            submitActionRef.current(aliveIndices[currentPosInAlive]);
+            return;
+          }
+          setFocusedTargetIndex(aliveIndices[currentPosInAlive]);
+        } else {
+          const targets = currentBattle.enemies;
+          const aliveIndices = targets.map((e, i) => (e.hp > 0 ? i : -1)).filter(i => i !== -1);
+          if (aliveIndices.length === 0) return;
+
+          let currentPosInAlive = aliveIndices.indexOf(currentFocusedTargetIndex);
+          if (currentPosInAlive === -1) currentPosInAlive = 0;
+
+          if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+            currentPosInAlive = (currentPosInAlive - 1 + aliveIndices.length) % aliveIndices.length;
+          } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+            currentPosInAlive = (currentPosInAlive + 1) % aliveIndices.length;
+          } else if (e.key === 'Enter' || e.key === ' ') {
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
+            sound.playSuccess();
+            console.log("Submitting enemy target. Index:", aliveIndices[currentPosInAlive]);
+            submitActionRef.current(aliveIndices[currentPosInAlive]);
+            return;
+          }
+          setFocusedTargetIndex(aliveIndices[currentPosInAlive]);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [screen]);
 
   // Listeners for Typing inputs during Action/Defense Phases
   useEffect(() => {
@@ -1259,11 +1589,31 @@ export default function App() {
     };
   }, [screen, battle.phase, battle.typingTarget, battle.typingStartTime, battle.typingLimitTime]);
 
+  // Trigger game over instantly if all party members are dead
+  useEffect(() => {
+    if (screen === 'battle' && battle.phase !== 'game_over') {
+      const anySurvivor = party.some((c) => !c.isDead);
+      if (!anySurvivor) {
+        setBattle((prev) => ({
+          ...prev,
+          phase: 'game_over',
+        }));
+      }
+    }
+  }, [party, screen, battle.phase]);
+
   const handleTypingFinished = (isCompleted: boolean) => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
     const hasMistake = battle.typingMistakeCount > 0;
     const isSuccess = isCompleted && !hasMistake;
+
+    // Clear typing targets immediately to hide the typing panel during animations
+    setBattle((prev) => ({
+      ...prev,
+      typingTarget: '',
+      typingInput: '',
+    }));
 
     // Record typing result
     setGlobalStats((prev) => ({
@@ -1292,6 +1642,33 @@ export default function App() {
     const skill = battle.selectedSkills[char.id] as (Skill & { targetIdx?: number });
     if (!skill) return;
 
+    // Set skill cooldowns based on user specifications
+    // Cooldown is decremented at the end of the current turn, so to prevent use in the next turn(s),
+    // we set it to cooldown_turns + 1.
+    let cooldownValue = 0;
+    const cooldown1TurnSkills = ['回転斬り', 'ニトロバーン', 'ヒール', 'ザ・シールド'];
+    const cooldown2TurnSkills = ['炎舞斬り', 'ライトニングブレイカー', 'オールヒール', '挑発'];
+    const cooldown3TurnSkills = ['氷雪斬り', 'ブリザードマウンテン', 'ツヨクナール', 'オールシールド'];
+
+    if (cooldown1TurnSkills.includes(skill.name)) {
+      cooldownValue = 2; // 1 turn cooldown (disabled for the next turn)
+    } else if (cooldown2TurnSkills.includes(skill.name)) {
+      cooldownValue = 3; // 2 turns cooldown (disabled for the next 2 turns)
+    } else if (cooldown3TurnSkills.includes(skill.name)) {
+      cooldownValue = 4; // 3 turns cooldown (disabled for the next 3 turns)
+    }
+
+    setParty(prev => prev.map(c => {
+      if (c.id === char.id) {
+        const nextCooldowns = { ...c.skillCooldowns };
+        if (cooldownValue > 0) {
+          nextCooldowns[skill.name] = cooldownValue;
+        }
+        return { ...c, skillCooldowns: nextCooldowns };
+      }
+      return c;
+    }));
+
     if (skill.name.includes('最終奥義')) {
       setParty(prev => prev.map(c => c.id === char.id ? { ...c, ultimateUsed: true } : c));
     }
@@ -1315,32 +1692,54 @@ export default function App() {
       sound.playDamage();
     }
 
+    // Ensure target is still alive, otherwise switch to nearest living enemy (if it is a targeted attack)
+    const isEnemyTargetSkill = skill.name !== 'ヒール' && skill.name !== 'オールヒール' && skill.name !== 'ツヨクナール' && skill.name !== 'ザ・シールド' && skill.name !== 'オールシールド' && skill.name !== '最終奥義・ザ・モンクレボリューション';
+    if (isEnemyTargetSkill && battle.enemies[targetIdx] && battle.enemies[targetIdx].hp <= 0) {
+      let bestIdx = -1;
+      let minDistance = Infinity;
+      for (let i = 0; i < battle.enemies.length; i++) {
+        if (battle.enemies[i].hp > 0) {
+          const dist = Math.abs(i - targetIdx);
+          if (dist < minDistance) {
+            minDistance = dist;
+            bestIdx = i;
+          }
+        }
+      }
+      if (bestIdx !== -1) {
+        targetIdx = bestIdx;
+      }
+    }
+
     // Process Skills Logic
     if (skill.name === '斬りつける') {
       baseDamage = 5 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-500 font-bold text-lg');
             return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！` : ''}`],
         };
       });
     } else if (skill.name === 'ひのこ') {
       baseDamage = 5 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
+        let isApplied = false;
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-orange-500 font-bold text-lg');
             const isBurned = Math.random() < 0.30;
+            isApplied = isBurned;
             return { 
               ...enemy, 
               hp: Math.max(enemy.hp - finalDamage, 0),
@@ -1350,27 +1749,29 @@ export default function App() {
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！${isApplied ? ' やけどさせた！' : ''}` : ''}`],
         };
       });
     } else if (skill.name === 'たたく') {
       baseDamage = 3 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-slate-400 font-bold text-md');
             return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！` : ''}`],
         };
       });
     } else if (skill.name === 'ヒール') {
@@ -1385,33 +1786,35 @@ export default function App() {
       }));
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${char.name} が ${party[targetIdx]?.name} に ${skill.name} をかけた！`],
+        battleLogs: [...prev.battleLogs, `${char.name} が ${party[targetIdx]?.name} に ${skill.name}！ ${healingAmount} 回復！`],
       }));
     } else if (skill.name === '斧で斬る') {
       baseDamage = 7 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-600 font-bold text-lg');
             return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！` : ''}`],
         };
       });
-    } else if (skill.name === '回転切り') {
+    } else if (skill.name === '回転斬り') {
       baseDamage = 10 * modifier;
-      // Hit target, target-1, target+1
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
+        let logs: string[] = [];
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx || idx === targetIdx - 1 || idx === targetIdx + 1) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if ((idx === targetIdx || idx === targetIdx - 1 || idx === targetIdx + 1) && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-500 font-extrabold text-xl animate-bounce');
+            logs.push(`${enemy.name}に${finalDamage}ダメージ`);
             return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
           }
           return enemy;
@@ -1419,17 +1822,19 @@ export default function App() {
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！(ミス時減衰適用: ${hasMistake ? 'あり' : 'なし'})`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${logs.join('、')}！`],
         };
       });
-    } else if (skill.name === '炎舞切り') {
+    } else if (skill.name === '炎舞斬り') {
       baseDamage = 20 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
+        let isApplied = false;
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-orange-500 font-extrabold text-2xl');
-            const isBurned = Math.random() < 0.10;
+            const isBurned = Math.random() < 0.40; // 40% chance
+            isApplied = isBurned;
             return { 
               ...enemy, 
               hp: Math.max(enemy.hp - finalDamage, 0),
@@ -1439,20 +1844,23 @@ export default function App() {
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！${isApplied ? ' やけど状態にした！' : ''}` : ''}`],
         };
       });
-    } else if (skill.name === '氷雪切り') {
+    } else if (skill.name === '氷雪斬り') {
       baseDamage = 30 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
+        let isApplied = false;
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-sky-400 font-extrabold text-2xl');
-            const isFrozen = Math.random() < 0.10;
+            const isFrozen = Math.random() < 0.50; // 50% chance
+            isApplied = isFrozen;
             return { 
               ...enemy, 
               hp: Math.max(enemy.hp - finalDamage, 0),
@@ -1462,10 +1870,11 @@ export default function App() {
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！${isApplied ? ' こおり状態にした！' : ''}` : ''}`],
         };
       });
     } else if (skill.name === '最終奥義・空間断絶斬') {
@@ -1473,9 +1882,9 @@ export default function App() {
       // Triggers death in 5 turns if character survives
       setParty(prev => prev.map(c => c.id === char.id ? { ...c, ultimateCooldown: 5 } : c));
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-purple-500 font-extrabold text-3xl');
             return { 
               ...enemy, 
@@ -1486,20 +1895,23 @@ export default function App() {
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の 最終奥義！ 5ターン後勇者は力尽きる...`],
+          battleLogs: [...prev.battleLogs, `${char.name} の空間断絶斬！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！` : ''} 5ターン後勇者は力尽きる...`],
         };
       });
     } else if (skill.name === 'ニトロバーン') {
       baseDamage = 10 * modifier;
       setBattle((prev) => {
+        const finalDamage = Math.floor(baseDamage * char.atkBuff);
+        let isApplied = false;
         const nextEnemies = prev.enemies.map((enemy, idx) => {
-          if (idx === targetIdx) {
-            const finalDamage = Math.floor(baseDamage * char.atkBuff);
+          if (idx === targetIdx && enemy.hp > 0) {
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-400 font-bold text-xl');
             const isBurned = Math.random() < 0.20;
+            isApplied = isBurned;
             return { 
               ...enemy, 
               hp: Math.max(enemy.hp - finalDamage, 0),
@@ -1509,23 +1921,26 @@ export default function App() {
           }
           return enemy;
         });
+        const targetEnemy = prev.enemies[targetIdx];
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${targetEnemy ? `${targetEnemy.name} に ${finalDamage} ダメージ！${isApplied ? ' やけど状態にした！' : ''}` : ''}`],
         };
       });
     } else if (skill.name === 'ライトニングブレイカー') {
       baseDamage = 15 * modifier;
       const splashDamage = 10 * modifier;
       setBattle((prev) => {
+        let logs: string[] = [];
         const nextEnemies = prev.enemies.map((enemy, idx) => {
           const isMain = idx === targetIdx;
           const isSplash = idx === targetIdx - 1 || idx === targetIdx + 1;
-          if (isMain || isSplash) {
+          if ((isMain || isSplash) && enemy.hp > 0) {
             const finalDamage = Math.floor((isMain ? baseDamage : splashDamage) * char.atkBuff);
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-yellow-400 font-extrabold text-xl');
-            const isShocked = isMain && Math.random() < 0.20;
+            const isShocked = isMain && Math.random() < 0.40; // 40% chance
+            logs.push(`${enemy.name}に${finalDamage}ダメージ${isShocked ? '(麻痺)' : ''}`);
             return { 
               ...enemy, 
               hp: Math.max(enemy.hp - finalDamage, 0),
@@ -1538,19 +1953,21 @@ export default function App() {
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${logs.join('、')}！`],
         };
       });
     } else if (skill.name === 'ブリザードマウンテン') {
       baseDamage = 30 * modifier;
       setBattle((prev) => {
+        let logs: string[] = [];
         const nextEnemies = prev.enemies.map((enemy, idx) => {
           const dist = Math.abs(idx - targetIdx);
           const rawDamage = Math.max(baseDamage - dist * 10, 0);
-          if (rawDamage > 0) {
+          if (rawDamage > 0 && enemy.hp > 0) {
             const finalDamage = Math.floor(rawDamage * char.atkBuff);
             addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-cyan-400 font-extrabold text-2xl');
-            const isFrozen = Math.random() < 0.20;
+            const isFrozen = Math.random() < 0.50; // 50% chance
+            logs.push(`${enemy.name}に${finalDamage}ダメージ${isFrozen ? '(凍結)' : ''}`);
             return { 
               ...enemy, 
               hp: Math.max(enemy.hp - finalDamage, 0),
@@ -1563,7 +1980,7 @@ export default function App() {
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+          battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ ${logs.join('、')}！`],
         };
       });
     } else if (skill.name === '最終奥義・エクスプロージョン') {
@@ -1575,15 +1992,23 @@ export default function App() {
         return { ...c, hp: Math.max(c.hp - 15, 0), isDead: c.hp - 15 <= 0 };
       }));
       setBattle((prev) => {
+        let logs: string[] = [];
         const nextEnemies = prev.enemies.map((enemy, idx) => {
+          if (enemy.hp <= 0) return enemy;
           const finalDamage = Math.floor(baseDamage * char.atkBuff);
           addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-600 font-extrabold text-3xl animate-ping');
-          return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
+          logs.push(`${enemy.name}に${finalDamage}ダメージ`);
+          return { 
+            ...enemy, 
+            hp: Math.max(enemy.hp - finalDamage, 0),
+            isExploded: true,
+            explosionTurns: 99
+          };
         });
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の究極魔法！ 味方にも15ダメージ！5ターン後死亡...`],
+          battleLogs: [...prev.battleLogs, `${char.name} の最終奥義エクスプロージョン！ ${logs.join('、')}＆毎ターン30の爆発効果付与！味方全体に15ダメージ！5ターン後死亡...`],
         };
       });
     } else if (skill.name === 'オールヒール') {
@@ -1596,7 +2021,7 @@ export default function App() {
       addDamageAnim(`+${healingAmount}`, 50, 60, 'text-green-400 font-bold text-2xl');
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+        battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ 味方全員が ${healingAmount} 回復！`],
       }));
     } else if (skill.name === 'ツヨクナール') {
       setParty((prev) => prev.map((c, idx) => {
@@ -1608,11 +2033,11 @@ export default function App() {
       }));
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${char.name} が ${party[targetIdx]?.name} に ${skill.name} をかけた！`],
+        battleLogs: [...prev.battleLogs, `${char.name} が ${party[targetIdx]?.name} に ${skill.name} をかけた！ 攻防20%上昇！`],
       }));
     } else if (skill.name === '最終奥義・ザ・モンクレボリューション') {
       setParty(prev => prev.map(c => {
-        const maxBuff = c.id === char.id ? { ...c, ultimateCooldown: 3 } : c;
+        const maxBuff = c.id === char.id ? { ...c, ultimateCooldown: 5 } : c; // death in 5 turns instead of 3
         return {
           ...maxBuff,
           atkBuff: 1.5,
@@ -1630,7 +2055,7 @@ export default function App() {
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の究極の祈り！ 味方は全回復し、全ステータス大上昇！3ターン後死亡する...`],
+          battleLogs: [...prev.battleLogs, `${char.name} の究極の祈りモンクレボリューション！ 敵全体を弱体化、味方全ステータス大上昇＆完全回復！5ターン後僧侶は力尽きる...`],
         };
       });
     } else if (skill.name === 'ザ・シールド') {
@@ -1644,7 +2069,7 @@ export default function App() {
       addDamageAnim(`シールド+${shieldValue}`, 80, 70, 'text-blue-400 font-bold text-sm');
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${char.name} は ${skill.name} でシールドを展開！`],
+        battleLogs: [...prev.battleLogs, `${char.name} は ${skill.name} で自身にシールド ${shieldValue} 展開！`],
       }));
     } else if (skill.name === '挑発') {
       // Directs attacks to warrior for 3 turns
@@ -1657,7 +2082,7 @@ export default function App() {
       addDamageAnim(`挑発(3T)`, 80, 70, 'text-red-400 font-bold text-sm');
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${char.name} が 挑発 して敵を引きつける！`],
+        battleLogs: [...prev.battleLogs, `${char.name} が 挑発 して敵の攻撃を3ターン自身に引きつける！`],
       }));
     } else if (skill.name === 'オールシールド') {
       const shieldValue = Math.floor(20 * modifier);
@@ -1668,7 +2093,7 @@ export default function App() {
       addDamageAnim(`全員シールド+${shieldValue}`, 50, 65, 'text-blue-400 font-bold text-lg');
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！`],
+        battleLogs: [...prev.battleLogs, `${char.name} の ${skill.name}！ 味方全員にシールド ${shieldValue} を付与！`],
       }));
     } else if (skill.name === '最終奥義・シールドブレイカー') {
       const shieldValue = Math.floor(50 * modifier);
@@ -1679,18 +2104,21 @@ export default function App() {
         return { ...withCooldown, shield: withCooldown.shield + shieldValue };
       }));
       setBattle((prev) => {
+        let logs: string[] = [];
         const nextEnemies = prev.enemies.map((enemy, idx) => {
+          if (enemy.hp <= 0) return enemy;
           const finalDamage = Math.floor(enemyDmg * char.atkBuff);
           addDamageAnim(`-${finalDamage}`, 20 + idx * 30, 30, 'text-red-500 font-extrabold text-2xl');
+          logs.push(`${enemy.name}に${finalDamage}ダメージ`);
           return { ...enemy, hp: Math.max(enemy.hp - finalDamage, 0) };
         });
         return {
           ...prev,
           enemies: nextEnemies,
-          battleLogs: [...prev.battleLogs, `${char.name} の最終盾技！ 全員に強大なシールドを張り、敵全体を撃破する！5ターン後死亡...`],
+          battleLogs: [...prev.battleLogs, `${char.name} の最終奥義シールドブレイカー！ ${logs.join('、')}！ 味方全員にシールド ${shieldValue} を展開！5ターン後死亡...`],
         };
       });
-    }
+    };
 
     // After action complete, move to next character or Enemy Turn
     setTimeout(() => {
@@ -1703,13 +2131,21 @@ export default function App() {
           return { ...prev, enemies: [] };
         }
 
-        // Find next executing character
-        let nextExecIdx = prev.executingCharIndex + 1;
-        while (nextExecIdx < party.length && party[nextExecIdx].isDead) {
-          nextExecIdx++;
+        // Find next executing character using custom execution order
+        const order = getExecutionOrder(party, prev.selectedSkills);
+        const currentPos = order.indexOf(prev.executingCharIndex);
+        let nextExecIdx = -1;
+        if (currentPos !== -1) {
+          for (let i = currentPos + 1; i < order.length; i++) {
+            const idx = order[i];
+            if (!party[idx].isDead && prev.selectedSkills[party[idx].id]) {
+              nextExecIdx = idx;
+              break;
+            }
+          }
         }
 
-        if (nextExecIdx < party.length) {
+        if (nextExecIdx !== -1) {
           // Trigger next character's typing
           setTimeout(() => startExecutionPhase(), 100);
           return {
@@ -1756,7 +2192,7 @@ export default function App() {
       return moveNextEnemyOrEnd(currentBattleState, enemyIdx);
     }
 
-    // Apply status conditions on enemies (frozen, etc.)
+    // Apply status conditions on enemies (frozen, shocked, etc.)
     if ((enemy as any).isFrozen && (enemy as any).freezeTurns > 0) {
       const nextEnemies = [...currentBattleState.enemies];
       (nextEnemies[enemyIdx] as any).freezeTurns--;
@@ -1766,7 +2202,34 @@ export default function App() {
       addDamageAnim('凍結中！', 20 + enemyIdx * 30, 20, 'text-sky-300 font-bold');
       
       const nextLogs = [...currentBattleState.battleLogs, `${enemy.name} は凍りついているため動けない！`];
-      const nextState = { ...currentBattleState, enemies: nextEnemies, battleLogs: nextLogs };
+      const nextState = { 
+        ...currentBattleState, 
+        enemies: nextEnemies, 
+        battleLogs: nextLogs,
+        typingTarget: '',
+        typingInput: '',
+        currentAttack: null
+      };
+      return moveNextEnemyOrEnd(nextState, enemyIdx);
+    }
+
+    if ((enemy as any).isShocked && (enemy as any).shockTurns > 0) {
+      const nextEnemies = [...currentBattleState.enemies];
+      (nextEnemies[enemyIdx] as any).shockTurns--;
+      if ((nextEnemies[enemyIdx] as any).shockTurns === 0) {
+        (nextEnemies[enemyIdx] as any).isShocked = false;
+      }
+      addDamageAnim('麻痺中！', 20 + enemyIdx * 30, 20, 'text-yellow-300 font-bold');
+      
+      const nextLogs = [...currentBattleState.battleLogs, `${enemy.name} は麻痺しているため動けない！`];
+      const nextState = { 
+        ...currentBattleState, 
+        enemies: nextEnemies, 
+        battleLogs: nextLogs,
+        typingTarget: '',
+        typingInput: '',
+        currentAttack: null
+      };
       return moveNextEnemyOrEnd(nextState, enemyIdx);
     }
 
@@ -1792,7 +2255,7 @@ export default function App() {
       targetCharIdx = aliveIdxs[Math.floor(Math.random() * aliveIdxs.length)];
     }
 
-    const limit = attack.roman.length * 1.0 + 1.5;
+    const limit = attack.roman.length * 0.5 + 1.5;
 
     // Trigger defence typing
     return {
@@ -1820,6 +2283,7 @@ export default function App() {
         ...state,
         typingTarget: '',
         typingInput: '',
+        currentAttack: null,
       };
     } else {
       // All enemies finished attacking. Tick status effects, then go to next turn!
@@ -1828,6 +2292,7 @@ export default function App() {
         ...state,
         typingTarget: '',
         typingInput: '',
+        currentAttack: null,
       };
     }
   };
@@ -1904,7 +2369,7 @@ export default function App() {
 
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${enemy.name} の全体攻撃 ${attack.name}！`],
+        battleLogs: [...prev.battleLogs, `${enemy.name} の全体攻撃 ${attack.name}！ 全員が ${finalDmg} ダメージを受けた！`],
       }));
     } else {
       // Single target attack
@@ -1935,7 +2400,7 @@ export default function App() {
 
       setBattle((prev) => ({
         ...prev,
-        battleLogs: [...prev.battleLogs, `${enemy.name} の ${attack.name}！`],
+        battleLogs: [...prev.battleLogs, `${enemy.name} の ${attack.name}！ ${defender.name} は ${finalDmg} ダメージを受けた！`],
       }));
     }
 
@@ -1949,7 +2414,7 @@ export default function App() {
       }
 
       setBattle((prev) => moveNextEnemyOrEnd(prev, prev.enemyAttackingIndex));
-    }, 1200);
+    }, 300);
   };
 
   const endTurnAndStartNext = () => {
@@ -1975,12 +2440,21 @@ export default function App() {
           }
         }
 
+        // Decrement skill cooldowns
+        const nextCooldowns = { ...char.skillCooldowns };
+        for (const skillName in nextCooldowns) {
+          if (nextCooldowns[skillName] > 0) {
+            nextCooldowns[skillName]--;
+          }
+        }
+
         return {
           ...char,
           hp: nextHp,
           isDead,
           ultimateCooldown: nextCooldown,
           provokeTurns: nextProvoke,
+          skillCooldowns: nextCooldowns,
         };
       });
     });
@@ -1993,6 +2467,7 @@ export default function App() {
 
         let bleed = 0;
         let burn = 0;
+        let explosion = 0;
 
         if ((enemy as any).isBurned && (enemy as any).burnTurns > 0) {
           burn = 3;
@@ -2005,9 +2480,19 @@ export default function App() {
           (enemy as any).bleedTurns--;
         }
 
-        const nextHp = Math.max(currentHp - (burn + bleed), 0);
-        if (burn + bleed > 0) {
-          addDamageAnim(`-${burn + bleed} (状態異常)`, 50, 20, 'text-orange-400 font-bold');
+        if ((enemy as any).isExploded && (enemy as any).explosionTurns > 0) {
+          explosion = 30;
+          (enemy as any).explosionTurns--;
+          if ((enemy as any).explosionTurns === 0) (enemy as any).isExploded = false;
+        }
+
+        const nextHp = Math.max(currentHp - (burn + bleed + explosion), 0);
+        if (burn + bleed + explosion > 0) {
+          let text = '';
+          if (burn > 0) text += `-${burn} (やけど) `;
+          if (bleed > 0) text += `-${bleed} (空間断絶) `;
+          if (explosion > 0) text += `-${explosion} (爆発) `;
+          addDamageAnim(text.trim(), 50, 20, 'text-orange-500 font-bold');
         }
 
         return {
@@ -2016,10 +2501,20 @@ export default function App() {
         };
       });
 
+      const aliveEnemies = nextEnemies.filter(e => e.hp > 0);
+      if (aliveEnemies.length === 0) {
+        setTimeout(() => winBattle(), 200);
+        return {
+          ...prev,
+          enemies: [],
+          phase: 'battle_result',
+        };
+      }
+
       // Clear action selection, increment turn
       return {
         ...prev,
-        enemies: nextEnemies.filter(e => e.hp > 0),
+        enemies: aliveEnemies,
         currentTurn: prev.currentTurn + 1,
         phase: 'action_select',
         currentCharIndex: getFirstAliveCharIndex(),
@@ -2034,6 +2529,14 @@ export default function App() {
       ...prev,
       phase: 'battle_result',
     }));
+    // Reset all skill cooldowns and shields at the end of the battle
+    setParty((prevParty) =>
+      prevParty.map((char) => ({
+        ...char,
+        skillCooldowns: {},
+        shield: 0,
+      }))
+    );
   };
 
   const handleDefeat = () => {
@@ -2041,6 +2544,13 @@ export default function App() {
       ...prev,
       phase: 'game_over',
     }));
+    // Reset shields at defeat
+    setParty((prevParty) =>
+      prevParty.map((char) => ({
+        ...char,
+        shield: 0,
+      }))
+    );
   };
 
   const restartCurrentStage = () => {
@@ -2055,6 +2565,7 @@ export default function App() {
         provokeTurns: 0,
         ultimateCooldown: 0,
         shield: 0,
+        skillCooldowns: {}, // Reset cooldowns when restarting stage
       }))
     );
     // Reset stage map entities
@@ -2063,7 +2574,7 @@ export default function App() {
   };
 
   const restartWholeGame = () => {
-    setParty(createParty(2));
+    setParty(createParty(1));
     setStageIndex(0);
     setScreen('start');
   };
@@ -2208,22 +2719,28 @@ export default function App() {
       
       {/* Dynamic Damage/Healing Animations overlay */}
       <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
-        {damageAnimations.map((anim) => (
-          <div
-            key={anim.id}
-            style={{ left: `${anim.x}%`, top: `${anim.y}%` }}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] ${anim.colorClass}`}
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 15, scale: 0.6 }}
-              animate={{ opacity: 1, y: -25, scale: 1.2 }}
-              exit={{ opacity: 0, scale: 1 }}
-              transition={{ duration: 0.8 }}
+        {damageAnimations.map((anim) => {
+          const isCentered = anim.x === 50;
+          return (
+            <div
+              key={anim.id}
+              style={{ left: `${anim.x}%`, top: `${anim.y}%` }}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] flex justify-center items-center ${
+                isCentered ? 'w-[90vw] max-w-lg' : ''
+              }`}
             >
-              {anim.text}
-            </motion.div>
-          </div>
-        ))}
+              <motion.div
+                initial={{ opacity: 0, y: 15, scale: 0.6 }}
+                animate={{ opacity: 1, y: -25, scale: 1.2 }}
+                exit={{ opacity: 0, scale: 1 }}
+                transition={{ duration: 0.8 }}
+                className={anim.colorClass}
+              >
+                {anim.text}
+              </motion.div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Header Container */}
@@ -2234,24 +2751,41 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 via-violet-300 to-pink-300 bg-clip-text text-transparent">
-              TYPING LEGEND
+              Typing Quest
             </h1>
-            <p className="text-xs text-slate-400 font-mono">2D Retro RPG Typing Adventure</p>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="text-xs bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-full font-mono flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            Stage {stageIndex + 1}: {STAGES[stageIndex]?.name}
-          </div>
+          {screen !== 'start' && (
+            <div className="text-xs bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-full font-mono flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              Stage {stageIndex + 1}: {STAGES[stageIndex]?.name}
+            </div>
+          )}
 
           <button
-            onClick={() => setSoundOn(!soundOn)}
-            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-300 transition-colors"
-            title={soundOn ? 'ミュートする' : '音声をONにする'}
+            onClick={() => {
+              if (isKKeyPressed) {
+                setTestMode((prev) => !prev);
+              } else {
+                setSoundOn((prev) => !prev);
+              }
+            }}
+            className={`p-2 border rounded-lg transition-colors ${
+              testMode
+                ? 'bg-rose-950 border-rose-500 text-rose-300 animate-pulse'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+            }`}
+            title={isKKeyPressed ? 'テストモード切替' : testMode ? 'テストモード作動中' : soundOn ? 'ミュートする' : '音声をONにする'}
           >
-            {soundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4 text-rose-400" />}
+            {testMode ? (
+              <Sparkles className="h-4 w-4" />
+            ) : soundOn ? (
+              <Volume2 className="h-4 w-4" />
+            ) : (
+              <VolumeX className="h-4 w-4 text-rose-400" />
+            )}
           </button>
         </div>
       </header>
@@ -2273,32 +2807,26 @@ export default function App() {
               
               <div className="text-4xl mb-2 select-none animate-bounce">⚔️👑🏰</div>
               
-              <h2 className="text-2xl font-extrabold tracking-tight text-white mb-1 font-mono">
-                タイピング・レジェンド
+              <h2 className="text-3xl font-normal tracking-tight text-white mb-4 font-dela">
+                Typing Quest
               </h2>
-              <p className="text-indigo-300 text-xs font-medium mb-3">
-                ~ 勇者のタイピングで世界を救うコマンドRPG ~
-              </p>
 
               <div className="bg-slate-950 p-3 border border-slate-800 rounded-lg text-left text-[11px] text-slate-300 space-y-1 mb-4 font-sans leading-relaxed">
                 <div className="flex gap-2 font-bold text-indigo-400 border-b border-slate-800 pb-1 items-center">
                   <Info className="h-3.5 w-3.5" /> ゲームの基本ルール
                 </div>
                 <p>・十字キーまたは画面タップで勇者を操作し、マップの敵と戦おう！</p>
-                <p>・戦闘時は、表示されるローマ字を**制限時間内**にタイピングして攻撃！</p>
-                <p>・敵の攻撃ターンでは、敵の技名をタイピングして**防御（ダメージ激減）**！</p>
+                <p>・戦闘時は、表示されるローマ字を制限時間内にタイピングして攻撃！</p>
+                <p>・敵の攻撃ターンでは、敵の技名をタイピングして防御（ダメージ激減）！</p>
                 <p>・1文字も間違えずに完遂すると最大ダメージ、ミスがあると効果が減衰します。</p>
                 <p>・各ステージのモンスターを一掃すると次のステージへのポータルが解放！</p>
               </div>
 
               <div className="grid grid-cols-4 gap-2 mb-4">
-                {createParty(2).map((char) => (
+                {createParty(1).map((char) => (
                   <div key={char.id} className="bg-slate-950 border border-slate-800 p-2 rounded-lg text-center">
                     <span className="text-xl block mb-0.5">{char.avatar}</span>
                     <span className="text-[10px] font-bold block truncate text-slate-200">{char.name.split(' ')[0]}</span>
-                    <span className="text-[9px] text-indigo-300 bg-indigo-950/40 px-1 py-0.2 rounded border border-indigo-900/30 inline-block mt-0.5 font-mono">
-                      {char.role === 'hero' ? '勇者' : char.role === 'mage' ? '魔法使' : char.role === 'priest' ? '僧侶' : '戦士'}
-                    </span>
                   </div>
                 ))}
               </div>
@@ -2330,12 +2858,51 @@ export default function App() {
                 <div className="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
                   <div className="flex items-center gap-2">
                     <Compass className="h-5 w-5 text-indigo-400" />
-                    <span className="font-extrabold text-white">2Dエリアマップ</span>
+                    <span className="font-extrabold text-white">{STAGES[stageIndex]?.name}</span>
                   </div>
                   <div className="text-xs text-slate-400 font-mono">
                     残りのモンスター: {mapEntities.filter((e) => e.type === 'monster').length} 匹
                   </div>
                 </div>
+
+                {testMode && (
+                  <div className="w-full bg-rose-950/40 border border-rose-900/50 p-2 rounded-lg mb-3 flex flex-col sm:flex-row items-center gap-2 z-10">
+                    <span className="text-[11px] font-extrabold text-rose-400 font-mono flex items-center gap-1">
+                      <Sparkles className="h-3.5 w-3.5 animate-spin" /> ステージジャンプ:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {STAGES.map((stg, idx) => (
+                        <button
+                          key={stg.number}
+                          onClick={() => {
+                            sound.playSuccess();
+                            setStageIndex(idx);
+                            setParty((prev) => 
+                              prev.map((c) => ({
+                                ...c,
+                                hp: c.maxHp,
+                                isDead: false,
+                                atkBuff: 1.0,
+                                defBuff: 1.0,
+                                provokeTurns: 0,
+                                ultimateCooldown: 0,
+                                shield: 0,
+                                skillCooldowns: {},
+                              }))
+                            );
+                          }}
+                          className={`px-2 py-1 rounded text-xs font-mono font-extrabold transition-all border ${
+                            stageIndex === idx
+                              ? 'bg-rose-500 text-slate-950 border-rose-400 shadow-lg shadow-rose-500/20'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-rose-500/50 hover:text-white'
+                          }`}
+                        >
+                          Stage {stg.number}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* 2D Map Grid (9x9) */}
                 <div className={`relative grid grid-cols-9 gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden w-full max-w-sm aspect-square ${STAGES[stageIndex]?.bgColor}`}>
@@ -2504,7 +3071,7 @@ export default function App() {
                     <Sparkles className="h-3.5 w-3.5" /> ステージ遷移のルール
                   </h3>
                   <p className="text-[11px] text-slate-300 leading-normal font-sans">
-                    すべての 👾 モンスターを討伐すると、北に配置されているポータル 🔮 が起動します。
+                    すべてのモンスターを討伐すると、北に配置されているポータルが起動します。
                     ポータルを踏むと次のステージへ進み、全員の体力が全回復します！
                   </p>
                 </div>
@@ -2523,145 +3090,174 @@ export default function App() {
               className="space-y-4"
             >
               {/* Battle Arena View (Split Row: Monsters & Player Party) */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[260px]">
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-950/30 pointer-events-none"></div>
+              {battle.phase !== 'battle_result' && battle.phase !== 'game_over' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[260px]">
+                  <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-950/30 pointer-events-none"></div>
 
-                {/* Upper row: Enemies */}
-                <div className="flex justify-around items-center py-2 relative z-10 gap-2">
-                  {battle.enemies.map((enemy, idx) => {
-                    const isTargeted = isChoosingTarget && pendingSkill;
-                    const isWeak = (enemy as any).isWeakened;
-                    const isBurn = (enemy as any).isBurned;
-                    const isFrost = (enemy as any).isFrozen;
+                  {/* Upper row: Enemies */}
+                  <div className="flex justify-around items-center py-2 relative z-10 gap-2">
+                    {battle.enemies.map((enemy, idx) => {
+                      const isSupportTemp = pendingSkill && (pendingSkill.skill.name === 'ツヨクナール' || pendingSkill.skill.name === 'ヒール');
+                      const isTargeted = isChoosingTarget && pendingSkill && !isSupportTemp;
+                      const isWeak = (enemy as any).isWeakened;
+                      const isBurn = (enemy as any).isBurned && (enemy as any).burnTurns > 0;
+                      const isFrost = (enemy as any).isFrozen && (enemy as any).freezeTurns > 0;
+                      const isShock = (enemy as any).isShocked && (enemy as any).shockTurns > 0;
+                      const isExploded = (enemy as any).isExploded && (enemy as any).explosionTurns > 0;
 
-                    return (
-                      <motion.div
-                        key={`${enemy.name}-${idx}`}
-                        className={`p-2 border rounded-lg flex flex-col items-center w-32 text-center transition-all relative ${
-                          enemy.hp <= 0 ? 'opacity-20 border-slate-800 bg-slate-950/30' : 'bg-slate-950 border-slate-800'
-                        } ${isTargeted && enemy.hp > 0 ? 'ring-4 ring-indigo-500 animate-pulse cursor-pointer' : ''}`}
-                        onClick={() => {
-                          if (isTargeted && enemy.hp > 0) {
-                            submitChosenAction(idx);
-                          }
-                        }}
-                      >
-                        {/* Status condition indicators */}
-                        <div className="absolute -top-2 flex gap-1">
-                          {isBurn && <span className="bg-orange-600 text-[10px] font-bold px-1 rounded flex items-center gap-0.5 text-white">🔥 燃</span>}
-                          {isFrost && <span className="bg-sky-600 text-[10px] font-bold px-1 rounded flex items-center gap-0.5 text-white">❄️ 凍</span>}
-                          {isWeak && <span className="bg-yellow-600 text-[10px] font-bold px-1 rounded text-white">☠️ 弱</span>}
-                        </div>
+                      const isSupport = pendingSkill && (pendingSkill.skill.name === 'ツヨクナール' || pendingSkill.skill.name === 'ヒール');
+                      const isFocusedTarget = isChoosingTarget && !isSupport && focusedTargetIndex === idx && enemy.hp > 0;
 
-                        {/* Active Attack Pointer */}
-                        {battle.phase === 'enemy_turn' && battle.enemyAttackingIndex === idx && (
-                          <div className="absolute -top-7 text-rose-500 font-extrabold animate-bounce text-xs bg-rose-950 px-2 py-0.5 rounded border border-rose-800 shadow">
-                            攻撃中！🗡️
+                      return (
+                        <motion.div
+                          key={`${enemy.name}-${idx}`}
+                          className={`p-2 border rounded-lg flex flex-col items-center w-32 text-center transition-all relative ${
+                            enemy.hp <= 0 ? 'opacity-20 border-slate-800 bg-slate-950/30' : 'bg-slate-950 border-slate-800'
+                          } ${isTargeted && enemy.hp > 0 ? (isFocusedTarget ? 'ring-4 ring-yellow-400 scale-105 border-yellow-400 z-10' : 'ring-4 ring-indigo-500 animate-pulse cursor-pointer') : ''}`}
+                          onClick={() => {
+                            if (isTargeted && enemy.hp > 0) {
+                              setFocusedTargetIndex(idx);
+                              submitChosenAction(idx);
+                            }
+                          }}
+                        >
+                          {/* Status condition indicators */}
+                          <div className="absolute -top-2 flex gap-1">
+                            {isBurn && <span className="bg-orange-600 text-[10px] font-bold px-1 rounded flex items-center gap-0.5 text-white">🔥 燃</span>}
+                            {isFrost && <span className="bg-sky-600 text-[10px] font-bold px-1 rounded flex items-center gap-0.5 text-white">❄️ 凍</span>}
+                            {isWeak && <span className="bg-yellow-600 text-[10px] font-bold px-1 rounded text-white">☠️ 弱</span>}
+                            {isShock && <span className="bg-amber-500 text-[10px] font-bold px-1 rounded flex items-center gap-0.5 text-white">⚡ 麻</span>}
+                            {isExploded && <span className="bg-red-600 text-[10px] font-bold px-1 rounded flex items-center gap-0.5 text-white">💥 爆</span>}
                           </div>
-                        )}
 
-                        <span className="text-3xl block mb-1">{enemy.hp > 0 ? enemy.avatar : '💀'}</span>
-                        <span className="text-xs font-extrabold block text-slate-200 leading-tight">{enemy.name}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">({enemy.romanName})</span>
+                          {/* Active Attack Pointer */}
+                          {battle.phase === 'enemy_turn' && battle.enemyAttackingIndex === idx && battle.typingTarget && (
+                            <div className="absolute -top-7 text-rose-500 font-extrabold animate-bounce text-xs bg-rose-950 px-2 py-0.5 rounded border border-rose-800 shadow">
+                              攻撃中！🗡️
+                            </div>
+                          )}
 
-                        {/* Health Bar */}
-                        <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800 mt-3">
-                          <div
-                            className="h-full bg-rose-500 transition-all duration-300"
-                            style={{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] font-mono font-bold mt-1 text-slate-400">
-                          HP: {enemy.hp} / {enemy.maxHp}
-                        </span>
-                      </motion.div>
-                    );
-                  })}
-                </div>
+                          {isFocusedTarget && (
+                            <div className="absolute -bottom-2 bg-yellow-400 text-slate-950 text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow animate-pulse z-20">
+                              🎯 ENTER決定
+                            </div>
+                          )}
 
-                {/* Middle line/divider logs */}
-                <div className="my-2 bg-slate-950/80 px-4 py-2 border-y border-slate-800/80 max-h-16 overflow-y-auto text-xs text-slate-300 font-mono space-y-1">
-                  {battle.battleLogs.slice(-2).map((log, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <span className="text-indigo-400 font-bold">▶</span> {log}
-                    </div>
-                  ))}
-                </div>
+                          <span className="text-3xl block mb-1">{enemy.hp > 0 ? enemy.avatar : '💀'}</span>
+                          <span className="text-xs font-extrabold block text-slate-200 leading-tight">{enemy.name}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">({enemy.romanName})</span>
 
-                {/* Lower row: Player Party Members */}
-                <div className={`flex justify-around items-center py-1.5 relative z-10 gap-2 ${battle.phase === 'battle_result' ? 'hidden' : ''}`}>
-                  {party.map((char, idx) => {
-                    const isTargetedForSupport = isChoosingTarget && pendingSkill && 
-                      (pendingSkill.skill.name === 'ツヨクナール' || pendingSkill.skill.name === 'ヒール');
-                    const isProvoking = char.provokeTurns > 0;
-                    const isUltimateCharging = char.ultimateCooldown > 0;
-
-                    return (
-                      <div
-                        key={char.id}
-                        className={`p-2 border rounded-lg flex flex-col items-center w-28 text-center transition-all relative ${
-                          char.isDead ? 'border-red-900 bg-red-950/10 opacity-30' : 'bg-slate-950 border-slate-800'
-                        } ${
-                          battle.phase === 'action_select' && battle.currentCharIndex === idx && !char.isDead
-                            ? 'ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/10 scale-105'
-                            : ''
-                        } ${
-                          battle.phase === 'action_execute' && battle.executingCharIndex === idx
-                            ? 'ring-2 ring-emerald-400 shadow-lg scale-105'
-                            : ''
-                        } ${
-                          battle.phase === 'enemy_turn' && battle.defendingCharIndex === idx
-                            ? 'ring-2 ring-rose-500 animate-pulse'
-                            : ''
-                        } ${isTargetedForSupport && !char.isDead ? 'ring-4 ring-green-500 cursor-pointer' : ''}`}
-                        onClick={() => {
-                          if (isTargetedForSupport && !char.isDead) {
-                            submitChosenAction(idx);
-                          }
-                        }}
-                      >
-                        {/* Ultimate timer badge */}
-                        {isUltimateCharging && (
-                          <div className="absolute -top-2 bg-purple-600 text-[10px] font-extrabold px-1.5 rounded text-white shadow">
-                            崩壊まで: {char.ultimateCooldown}T
+                          {/* Health Bar */}
+                          <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800 mt-3">
+                            <div
+                              className="h-full bg-rose-500 transition-all duration-300"
+                              style={{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }}
+                            />
                           </div>
-                        )}
-                        {isProvoking && (
-                          <div className="absolute -top-2 bg-rose-600 text-[10px] font-bold px-1.5 rounded text-white shadow">
-                            挑発中
-                          </div>
-                        )}
-
-                        <span className="text-2xl block mb-0.5">{char.isDead ? '💀' : char.avatar}</span>
-                        <span className="text-xs font-bold block text-slate-200 leading-tight">{char.name.split(' ')[0]}</span>
-                        <span className="text-[9px] text-slate-500 font-mono">LV {char.level}</span>
-
-                        {/* HP status value */}
-                        <span className="text-[10px] font-mono font-bold mt-1 text-slate-300">
-                          {char.hp} / {char.maxHp}
-                        </span>
-
-                        {/* Shield Badge */}
-                        {char.shield > 0 && (
-                          <span className="text-[9px] font-mono text-blue-400 bg-blue-950 border border-blue-900/60 px-1 rounded-full mt-1">
-                            🛡️ +{char.shield}
+                          <span className="text-[10px] font-mono font-bold mt-1 text-slate-400">
+                            HP: {enemy.hp} / {enemy.maxHp}
                           </span>
-                        )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
 
-                        {/* HP Bar */}
-                        <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800 mt-2">
-                          <div
-                            className={`h-full transition-all duration-300 ${
-                              char.isDead ? 'bg-transparent' : char.hp / char.maxHp < 0.3 ? 'bg-rose-500' : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${char.isDead ? 0 : (char.hp / char.maxHp) * 100}%` }}
-                          />
+                  {/* Middle line/divider logs */}
+                  <div className="my-2 bg-slate-950/80 px-4 py-2 border-y border-slate-800/80 max-h-20 overflow-y-auto text-xs text-slate-300 font-mono space-y-1">
+                    {battle.battleLogs.slice(-2).map((log, i) => {
+                      const formattedLog = log.replace(/！[ 　]+/g, '！\n');
+                      return (
+                        <div key={i} className="flex gap-2 items-start whitespace-pre-line">
+                          <span className="text-indigo-400 font-bold mt-0.5">▶</span>
+                          <span className="flex-1">{formattedLog}</span>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+
+                  {/* Lower row: Player Party Members */}
+                  <div className={`flex justify-around items-center py-1.5 relative z-10 gap-2 ${battle.phase === 'battle_result' ? 'hidden' : ''}`}>
+                    {party.map((char, idx) => {
+                      const isTargetedForSupport = isChoosingTarget && pendingSkill && 
+                        (pendingSkill.skill.name === 'ツヨクナール' || pendingSkill.skill.name === 'ヒール');
+                      const isProvoking = char.provokeTurns > 0;
+                      const isUltimateCharging = char.ultimateCooldown > 0;
+
+                      const isFocusedTarget = isChoosingTarget && isTargetedForSupport && focusedTargetIndex === idx && !char.isDead;
+
+                      return (
+                        <div
+                          key={char.id}
+                          className={`p-2 border rounded-lg flex flex-col items-center w-28 text-center transition-all relative ${
+                            char.isDead ? 'border-red-900 bg-red-950/10 opacity-30' : 'bg-slate-950 border-slate-800'
+                          } ${
+                            battle.phase === 'action_select' && battle.currentCharIndex === idx && !char.isDead
+                              ? 'ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/10 scale-105'
+                              : ''
+                          } ${
+                            battle.phase === 'action_execute' && battle.executingCharIndex === idx
+                              ? 'ring-2 ring-emerald-400 shadow-lg scale-105'
+                              : ''
+                          } ${
+                            battle.phase === 'enemy_turn' && battle.defendingCharIndex === idx
+                              ? 'ring-2 ring-rose-500 animate-pulse'
+                              : ''
+                          } ${isTargetedForSupport && !char.isDead ? (isFocusedTarget ? 'ring-4 ring-yellow-400 scale-105 border-yellow-400 z-10' : 'ring-4 ring-green-500 cursor-pointer') : ''}`}
+                          onClick={() => {
+                            if (isTargetedForSupport && !char.isDead) {
+                              setFocusedTargetIndex(idx);
+                              submitChosenAction(idx);
+                            }
+                          }}
+                        >
+                          {/* Ultimate timer badge */}
+                          {isUltimateCharging && (
+                            <div className="absolute -top-2 bg-purple-600 text-[10px] font-extrabold px-1.5 rounded text-white shadow">
+                              崩壊まで: {char.ultimateCooldown}T
+                            </div>
+                          )}
+                          {isProvoking && (
+                            <div className="absolute -top-2 bg-rose-600 text-[10px] font-bold px-1.5 rounded text-white shadow">
+                              挑発中
+                            </div>
+                          )}
+                          {isFocusedTarget && (
+                            <div className="absolute -bottom-2 bg-yellow-400 text-slate-950 text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow animate-pulse z-20">
+                              🎯 ENTER決定
+                            </div>
+                          )}
+
+                          <span className="text-2xl block mb-0.5">{char.isDead ? '💀' : char.avatar}</span>
+                          <span className="text-xs font-bold block text-slate-200 leading-tight">{char.name.split(' ')[0]}</span>
+                          <span className="text-[9px] text-slate-500 font-mono">LV {char.level}</span>
+
+                          {/* HP status value */}
+                          <span className="text-[10px] font-mono font-bold mt-1 text-slate-300">
+                            {char.hp} / {char.maxHp}
+                          </span>
+
+                          {/* Shield Badge */}
+                          {char.shield > 0 && (
+                            <span className="text-[9px] font-mono text-blue-400 bg-blue-950 border border-blue-900/60 px-1 rounded-full mt-1">
+                              🛡️ +{char.shield}
+                            </span>
+                          )}
+
+                          {/* HP Bar */}
+                          <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800 mt-2">
+                            <div
+                              className={`h-full transition-all duration-300 ${
+                                char.isDead ? 'bg-transparent' : char.hp / char.maxHp < 0.3 ? 'bg-rose-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${char.isDead ? 0 : (char.hp / char.maxHp) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Phase Controller Panels */}
               <AnimatePresence mode="wait">
@@ -2699,22 +3295,32 @@ export default function App() {
 
                     {!isChoosingTarget ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {party[battle.currentCharIndex]?.skills.map((skill) => {
-                          const meetsReq = party[battle.currentCharIndex].level >= skill.levelRequired &&
-                            (!skill.name.includes('最終奥義') || !party[battle.currentCharIndex].ultimateUsed);
+                        {party[battle.currentCharIndex]?.skills.map((skill, skillIdx) => {
+                          const cooldown = party[battle.currentCharIndex].skillCooldowns?.[skill.name] || 0;
+                          const meetsReq = (testMode || party[battle.currentCharIndex].level >= skill.levelRequired) &&
+                            (!skill.name.includes('最終奥義') || !party[battle.currentCharIndex].ultimateUsed) &&
+                            cooldown === 0;
+                          const isFocused = !isChoosingTarget && focusedSkillIndex === skillIdx;
                           return (
                             <button
                               key={skill.name}
                               disabled={!meetsReq}
-                              onClick={() => selectSkillForChar(skill)}
+                              tabIndex={-1}
+                              onClick={(e) => {
+                                e.currentTarget.blur();
+                                setFocusedSkillIndex(skillIdx);
+                                selectSkillForChar(skill);
+                              }}
                               className={`p-2 rounded-lg border text-left transition-all relative overflow-hidden group flex flex-col justify-between h-18 ${
                                 meetsReq
-                                  ? 'bg-slate-950 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900/60'
+                                  ? isFocused
+                                    ? 'bg-slate-900 border-indigo-500 ring-2 ring-indigo-500/50 scale-[1.02]'
+                                    : 'bg-slate-950 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900/60'
                                   : 'bg-slate-950/20 border-slate-900/50 opacity-40 cursor-not-allowed'
                               }`}
                             >
                               <div className="flex justify-between items-start w-full">
-                                <span className={`text-xs font-bold ${meetsReq ? 'text-indigo-300' : 'text-slate-500'}`}>
+                                <span className={`text-xs font-bold ${meetsReq ? (isFocused ? 'text-yellow-300' : 'text-indigo-300') : 'text-slate-500'}`}>
                                   {skill.name}
                                 </span>
                                 <span className="text-[9px] text-slate-500 font-mono">
@@ -2726,9 +3332,11 @@ export default function App() {
                               </p>
                               {!meetsReq && (
                                 <span className="absolute inset-0 bg-slate-950/90 flex items-center justify-center font-bold text-[10px] text-rose-400 font-mono border border-slate-800 text-center px-1">
-                                  {party[battle.currentCharIndex].level < skill.levelRequired 
+                                  {!testMode && party[battle.currentCharIndex].level < skill.levelRequired 
                                     ? `レベル ${skill.levelRequired} で解放` 
-                                    : '最終奥義は1回のみ使用可能'}
+                                    : cooldown > 0
+                                      ? `リチャージ中 (あと ${cooldown} ターン)`
+                                      : '最終奥義は1回のみ使用可能'}
                                 </span>
                               )}
                             </button>
@@ -2736,19 +3344,24 @@ export default function App() {
                         })}
                       </div>
                     ) : (
-                      <div className="p-4 text-center bg-slate-950 border border-slate-800 rounded-lg">
+                      <div className="p-4 text-center bg-slate-950 border border-slate-800 rounded-lg space-y-2">
                         <span className="text-xl block animate-bounce mb-1">🎯</span>
                         <h4 className="font-extrabold text-white mb-0.5 text-xs">対象（ターゲット）を選択してください</h4>
-                        <p className="text-[10px] text-slate-400">
-                          上部の戦場画面にいるモンスター、あるいはパーティーメンバーを直接タップしてください。
-                        </p>
+                        <div className="text-[10px] text-slate-400 space-y-1">
+                          <p>
+                            キーボードの <span className="text-indigo-400 font-bold border border-slate-700 px-1 py-0.5 rounded font-mono">← →</span> または <span className="text-indigo-400 font-bold border border-slate-700 px-1 py-0.5 rounded font-mono">A D</span> でターゲットを選択し、<span className="text-indigo-400 font-bold border border-slate-700 px-1 py-0.5 rounded font-mono">Enter</span> / <span className="text-indigo-400 font-bold border border-slate-700 px-1 py-0.5 rounded font-mono">Space</span> で決定！
+                          </p>
+                          <p className="text-slate-500">
+                            （<span className="text-rose-400 font-bold border border-slate-800 px-1 py-0.5 rounded font-mono">Esc</span> または <span className="text-rose-400 font-bold border border-slate-800 px-1 py-0.5 rounded font-mono">Backspace</span> でスキル選択に戻ります。画面を直接クリックして選ぶことも可能です）
+                          </p>
+                        </div>
                       </div>
                     )}
                   </motion.div>
                 )}
 
                 {/* PHASE 2: TYPING GAME BOARD (ATTACK AND GUARD EXECUTION) */}
-                {(battle.phase === 'action_execute' || battle.phase === 'enemy_turn') && (
+                {(battle.phase === 'action_execute' || battle.phase === 'enemy_turn') && battle.typingTarget && (battle.phase === 'enemy_turn' ? !!battle.currentAttack : true) && (
                   <motion.div
                     key="typing_board"
                     initial={{ opacity: 0, scale: 0.96 }}
@@ -2816,10 +3429,10 @@ export default function App() {
                 {battle.phase === 'battle_result' && (
                   <motion.div
                     key="battle_victory_panel"
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0 }}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl space-y-6"
+                    className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl space-y-6 max-w-lg mx-auto w-full"
                   >
                     <div className="text-6xl animate-pulse">👑✨⚔️</div>
                     <div>
@@ -2863,22 +3476,22 @@ export default function App() {
                 {battle.phase === 'game_over' && (
                   <motion.div
                     key="battle_defeat_panel"
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0 }}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl space-y-6"
+                    className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl space-y-6 max-w-lg mx-auto w-full"
                   >
                     <div className="text-6xl animate-bounce">💀🏜️🥀</div>
                     <div>
                       <h3 className="text-3xl font-extrabold text-rose-500 font-mono">全員敗北...</h3>
                       <p className="text-sm text-slate-400 mt-1">
-                        パーティー全員のHPが0になってしまいました。
+                        パーティー全員 of HPが0になってしまいました。
                       </p>
                     </div>
 
                     <div className="bg-indigo-950/20 border border-indigo-900/40 p-4 rounded-xl text-left text-xs text-slate-300 max-w-md mx-auto">
                       <strong>💡 コンティニュー特典:</strong> <br />
-                      レベル、覚えたワザ、すべてのステータスはそのままで、挑戦中のステージの最初からやり直すことができます！
+                      レベル、覚えたワザ、すべてのステータスはそのままで、挑戦中のステージの最初からやり真すことができます！
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
@@ -2991,7 +3604,7 @@ export default function App() {
 
       {/* Footer / Credits */}
       <footer className="border-t border-slate-900 bg-slate-950 px-4 py-4 text-center text-[10px] text-slate-600 font-mono">
-        <p>© 2026 TYPING LEGEND. Made with Love by AI & Human Craftsmanship.</p>
+        <p>© 2026 Typing Quest. Made with Love by AI & Human Craftsmanship.</p>
       </footer>
     </div>
   );

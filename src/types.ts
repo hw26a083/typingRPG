@@ -14,6 +14,7 @@ export interface Character {
   ultimateCooldown: number; // ultimate life countdown
   shield: number; // shield value
   ultimateUsed?: boolean;
+  skillCooldowns?: { [skillName: string]: number };
 }
 
 export interface Skill {
