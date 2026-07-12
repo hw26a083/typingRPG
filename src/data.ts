@@ -28,7 +28,7 @@ export const SKILLS: { [role: string]: Skill[] } = {
     },
     {
       name: '最終奥義・空間断絶斬',
-      roman: 'saisyuuougi・kuukadanzetuzan',
+      roman: 'saisyuuougi・kuukandanzetuzann',
       desc: '選択した敵に50ダメージを与え、数ターン10ダメージの追加効果。5ターン後に勇者は死亡する。',
       levelRequired: 4,
     },
@@ -141,7 +141,7 @@ export const STAGES = [
       {
         name: 'スライム',
         romanName: 'suraimu',
-        avatar: '🟢',
+        avatar: '/image/slime.png',
         hp: 10,
         maxHp: 10,
         attacks: [
@@ -151,7 +151,7 @@ export const STAGES = [
       {
         name: 'スケルトン',
         romanName: 'sukeruton',
-        avatar: '💀',
+        avatar: '/image/skeleton.png',
         hp: 15,
         maxHp: 15,
         attacks: [
@@ -161,7 +161,7 @@ export const STAGES = [
       {
         name: '魔女',
         romanName: 'majo',
-        avatar: '🧙‍♀️',
+        avatar: '/image/witch.png',
         hp: 20,
         maxHp: 20,
         attacks: [
@@ -179,7 +179,7 @@ export const STAGES = [
       {
         name: 'サンドワーム',
         romanName: 'sandowa-mu',
-        avatar: '🪱',
+        avatar: '/image/sandworm.png',
         hp: 50,
         maxHp: 50,
         attacks: [
@@ -189,7 +189,7 @@ export const STAGES = [
       {
         name: 'ミイラ',
         romanName: 'miira',
-        avatar: '🧟',
+        avatar: '/image/mummy.png',
         hp: 40,
         maxHp: 40,
         attacks: [
@@ -200,7 +200,7 @@ export const STAGES = [
       {
         name: '蛮族',
         romanName: 'banzoku',
-        avatar: '🪓',
+        avatar: '/image/barbarian.png',
         hp: 30,
         maxHp: 30,
         attacks: [
@@ -218,7 +218,7 @@ export const STAGES = [
       {
         name: 'イエティ',
         romanName: 'ieti',
-        avatar: '🦧',
+        avatar: '/image/yeti.png',
         hp: 100,
         maxHp: 100,
         attacks: [
@@ -228,7 +228,7 @@ export const STAGES = [
       {
         name: '雪女',
         romanName: 'yukionna',
-        avatar: '❄️',
+        avatar: '/image/snow_woman.png',
         hp: 70,
         maxHp: 70,
         attacks: [
@@ -239,7 +239,7 @@ export const STAGES = [
       {
         name: '邪悪なペンギン',
         romanName: 'jaakuna-pengin',
-        avatar: '🐧',
+        avatar: '/image/evil_penguin.png',
         hp: 60,
         maxHp: 60,
         attacks: [
@@ -258,7 +258,7 @@ export const STAGES = [
       {
         name: 'マグマスライム',
         romanName: 'magumasuraimu',
-        avatar: '🌋',
+        avatar: '/image/magma_slime.png',
         hp: 60,
         maxHp: 60,
         attacks: [
@@ -268,7 +268,7 @@ export const STAGES = [
       {
         name: 'リザードマン',
         romanName: 'riza-doman',
-        avatar: '🐊',
+        avatar: '/image/lizardman.png',
         hp: 80,
         maxHp: 80,
         attacks: [
@@ -279,7 +279,7 @@ export const STAGES = [
       {
         name: 'フレイムドラゴン',
         romanName: 'fureimudoragon',
-        avatar: '🐉',
+        avatar: '/image/flame_dragon.png',
         hp: 100,
         maxHp: 100,
         attacks: [
@@ -294,45 +294,14 @@ export const STAGES = [
     name: '魔王城 (Demon Castle)',
     bgColor: 'bg-slate-950 border-purple-600',
     tileColor: 'bg-indigo-950',
-    monsterTemplates: [
-      {
-        name: 'デスナイト',
-        romanName: 'desunaito',
-        avatar: '💀',
-        hp: 110,
-        maxHp: 110,
-        attacks: [
-          { name: 'ダークスラッシュ', roman: 'da-kusurassyu', damage: 45 },
-        ],
-      },
-      {
-        name: 'アークデーモン',
-        romanName: 'a-kude-mon',
-        avatar: '👿',
-        hp: 130,
-        maxHp: 130,
-        attacks: [
-          { name: 'ヘルファイア', roman: 'herufaia', damage: 50 },
-        ],
-      },
-      {
-        name: 'サキュバス',
-        romanName: 'sakyubasu',
-        avatar: '🧛‍♀️',
-        hp: 100,
-        maxHp: 100,
-        attacks: [
-          { name: 'ドレインキッス', roman: 'doreinkissu', damage: 35, effect: 'debuff_atk', chance: 30 },
-        ],
-      },
-    ] as Enemy[],
+    monsterTemplates: [] as Enemy[],
   },
 ];
 
 export const BOSS_TEMPLATE: Enemy = {
   name: '魔王',
   romanName: 'maou',
-  avatar: '😈',
+  avatar: '/image/demon_king.png',
   hp: 500,
   maxHp: 500,
   attacks: [
