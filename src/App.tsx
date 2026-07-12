@@ -158,28 +158,31 @@ const ORIGINAL_STABLE_URL = "https://ais-pre-lxpvyvsmpia4dogk37sgay-561811395117
 const getPortableImagePath = (path: string): string => {
   if (!path) return '';
   if (path.startsWith('/image/')) {
-    // 現在のオリジンが、元の開発/共有環境（lxpvyvsmpia4dogk37sgay）またはローカル環境でない場合、
-    // コピー先（Remix先）とみなして元の安定したURLから直接画像を読み込みます。
-    const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
-    const isOriginalOrLocal = 
-      currentHost.includes('lxpvyvsmpia4dogk37sgay') || 
-      currentHost === 'localhost' || 
-      currentHost === '127.0.0.1' ||
-      currentHost === '';
-
-    if (!isOriginalOrLocal) {
-      return `${ORIGINAL_STABLE_URL}${path}`;
-    }
-    return `.${path}`;
+    // 画像アセットが /public 直下に置かれているため、'/image/' を除去して './filename' に解決する
+    const filename = path.replace('/image/', '');
+    return `./${filename}`;
   }
   return path;
 };
 
 const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
   const img = e.currentTarget;
-  const rawPath = img.getAttribute('data-rawpath');
-  if (rawPath && !img.src.startsWith(ORIGINAL_STABLE_URL)) {
+  const rawPath = img.getAttribute('data-rawpath'); // 例: '/image/hero.png'
+  if (rawPath) {
+    // すでに安定版URLからの読み込みを試みてさらにエラーになっている場合は無限ループを回避
+    if (img.src.startsWith(ORIGINAL_STABLE_URL)) {
+      return;
+    }
+    
+    // 元の安定版サーバーの '/image/xxx.png' からの読み込みを試す
     img.src = `${ORIGINAL_STABLE_URL}${rawPath}`;
+    
+    // 元のサーバーでも直下に移動している可能性を考慮して、さらに失敗したら直下のパスを試す
+    img.onerror = () => {
+      const filename = rawPath.replace('/image/', '');
+      img.src = `${ORIGINAL_STABLE_URL}/${filename}`;
+      img.onerror = null; // 最終フォールバック終了
+    };
   }
 };
 
@@ -3134,7 +3137,18 @@ export default function App() {
                   onError={(e) => {
                     const img = e.currentTarget;
                     if (!img.src.startsWith(ORIGINAL_STABLE_URL)) {
+                      // まずは元の /image/title_rogo.png を試す
                       img.src = `${ORIGINAL_STABLE_URL}/image/title_rogo.png`;
+                      img.onerror = () => {
+                        // ダメなら直下の /title_rogo.png を試す
+                        img.src = `${ORIGINAL_STABLE_URL}/title_rogo.png`;
+                        img.onerror = () => {
+                          // それでもダメならテキストのフォールバックを表示する
+                          img.style.display = 'none';
+                          const fallback = document.getElementById('title-fallback-text');
+                          if (fallback) fallback.classList.remove('hidden');
+                        };
+                      };
                     } else {
                       img.style.display = 'none';
                       const fallback = document.getElementById('title-fallback-text');
